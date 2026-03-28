@@ -1,0 +1,932 @@
+[
+  {
+    "sheet_id": "finqa_6ed46f1a::Financial_Table",
+    "source": "FinQA",
+    "headers": [
+      {
+        "text": "in millions",
+        "row": 0,
+        "col": 0,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "december 31 2012 amortized cost",
+        "row": 0,
+        "col": 1,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "december 31 2012 fair value",
+        "row": 0,
+        "col": 2,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "december 31 2012 amortized cost_1",
+        "row": 0,
+        "col": 3,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "fair value",
+        "row": 0,
+        "col": 4,
+        "dtype": "text",
+        "dtype_detail": {}
+      }
+    ],
+    "num_rows": 3,
+    "num_cols": 5
+  },
+  {
+    "sheet_id": "finqa_19780127::Financial_Table",
+    "source": "FinQA",
+    "headers": [
+      {
+        "text": "( in thousands )",
+        "row": 0,
+        "col": 0,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "december 31 2007",
+        "row": 0,
+        "col": 1,
+        "dtype": "text",
+        "dtype_detail": {}
+      }
+    ],
+    "num_rows": 6,
+    "num_cols": 2
+  },
+  {
+    "sheet_id": "finqa_3baeb74c::Financial_Table",
+    "source": "FinQA",
+    "headers": [
+      {
+        "text": "in millions",
+        "row": 0,
+        "col": 0,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "operating leases",
+        "row": 0,
+        "col": 1,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "capital leases",
+        "row": 0,
+        "col": 2,
+        "dtype": "text",
+        "dtype_detail": {}
+      }
+    ],
+    "num_rows": 9,
+    "num_cols": 3
+  },
+  {
+    "sheet_id": "finqa_7e188391::Financial_Table",
+    "source": "FinQA",
+    "headers": [
+      {
+        "text": "type of obligations",
+        "row": 0,
+        "col": 0,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "total",
+        "row": 0,
+        "col": 1,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "payments due in less than 1 year",
+        "row": 0,
+        "col": 2,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "payments due in 1-3 years",
+        "row": 0,
+        "col": 3,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "payments due in 3-5 years",
+        "row": 0,
+        "col": 4,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "payments due in more than 5 years",
+        "row": 0,
+        "col": 5,
+        "dtype": "text",
+        "dtype_detail": {}
+      }
+    ],
+    "num_rows": 6,
+    "num_cols": 6
+  },
+  {
+    "sheet_id": "finqa_c18c646c::Financial_Table",
+    "source": "FinQA",
+    "headers": [
+      {
+        "text": "balance at january 1 2013",
+        "row": 0,
+        "col": 0,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "$ 180993",
+        "row": 0,
+        "col": 1,
+        "dtype": "text",
+        "dtype_detail": {}
+      }
+    ],
+    "num_rows": 6,
+    "num_cols": 2
+  },
+  {
+    "sheet_id": "finqa_aca979b9::Financial_Table",
+    "source": "FinQA",
+    "headers": [
+      {
+        "text": "( in millions )",
+        "row": 0,
+        "col": 0,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "2009",
+        "row": 0,
+        "col": 1,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "2008",
+        "row": 0,
+        "col": 2,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "2007",
+        "row": 0,
+        "col": 3,
+        "dtype": "text",
+        "dtype_detail": {}
+      }
+    ],
+    "num_rows": 9,
+    "num_cols": 4
+  },
+  {
+    "sheet_id": "finqa_5edb976c::Financial_Table",
+    "source": "FinQA",
+    "headers": [
+      {
+        "text": "number of shares",
+        "row": 0,
+        "col": 0,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "exercise price",
+        "row": 0,
+        "col": 1,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "expiration date",
+        "row": 0,
+        "col": 2,
+        "dtype": "text",
+        "dtype_detail": {}
+      }
+    ],
+    "num_rows": 6,
+    "num_cols": 3
+  },
+  {
+    "sheet_id": "finqa_a124e200::Financial_Table",
+    "source": "FinQA",
+    "headers": [
+      {
+        "text": "contractual obligations",
+        "row": 0,
+        "col": 0,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "total",
+        "row": 0,
+        "col": 1,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "2009",
+        "row": 0,
+        "col": 2,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "2010 and 2011",
+        "row": 0,
+        "col": 3,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "2012 and 2013",
+        "row": 0,
+        "col": 4,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "2014 and thereafter",
+        "row": 0,
+        "col": 5,
+        "dtype": "text",
+        "dtype_detail": {}
+      }
+    ],
+    "num_rows": 6,
+    "num_cols": 6
+  },
+  {
+    "sheet_id": "finqa_94e5f8b6::Financial_Table",
+    "source": "FinQA",
+    "headers": [
+      {
+        "text": "beginning balance as of december 1 2007",
+        "row": 0,
+        "col": 0,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "$ 201808",
+        "row": 0,
+        "col": 1,
+        "dtype": "text",
+        "dtype_detail": {}
+      }
+    ],
+    "num_rows": 6,
+    "num_cols": 2
+  },
+  {
+    "sheet_id": "finqa_8bd54d4c::Financial_Table",
+    "source": "FinQA",
+    "headers": [
+      {
+        "text": "location",
+        "row": 0,
+        "col": 0,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "approximate square footage",
+        "row": 0,
+        "col": 1,
+        "dtype": "text",
+        "dtype_detail": {}
+      }
+    ],
+    "num_rows": 7,
+    "num_cols": 2
+  },
+  {
+    "sheet_id": "tableinstruct_5da48e5bf02715d03056e445c48b18::Sheet1",
+    "source": "HiTab",
+    "headers": [
+      {
+        "text": "rank",
+        "row": 0,
+        "col": 0,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "team",
+        "row": 0,
+        "col": 1,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "floor exercise",
+        "row": 0,
+        "col": 2,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "pommel horse",
+        "row": 0,
+        "col": 3,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "rings",
+        "row": 0,
+        "col": 4,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "vault",
+        "row": 0,
+        "col": 5,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "parallel bars",
+        "row": 0,
+        "col": 6,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "horizontal bar",
+        "row": 0,
+        "col": 7,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "total",
+        "row": 0,
+        "col": 8,
+        "dtype": "text",
+        "dtype_detail": {}
+      }
+    ],
+    "num_rows": 8,
+    "num_cols": 9
+  },
+  {
+    "sheet_id": "tableinstruct_924964023b7a8142bf636c1a4b9cc1::Sheet1",
+    "source": "HiTab",
+    "headers": [
+      {
+        "text": "Pos",
+        "row": 0,
+        "col": 0,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "No.",
+        "row": 0,
+        "col": 1,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "Driver",
+        "row": 0,
+        "col": 2,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "Team",
+        "row": 0,
+        "col": 3,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "Laps",
+        "row": 0,
+        "col": 4,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "Time/Retired",
+        "row": 0,
+        "col": 5,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "Grid",
+        "row": 0,
+        "col": 6,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "Laps Led",
+        "row": 0,
+        "col": 7,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "Points",
+        "row": 0,
+        "col": 8,
+        "dtype": "text",
+        "dtype_detail": {}
+      }
+    ],
+    "num_rows": 21,
+    "num_cols": 9
+  },
+  {
+    "sheet_id": "tableinstruct_f2e054abf6f6909d3d17503b2171f4::Sheet1",
+    "source": "HiTab",
+    "headers": [
+      {
+        "text": "year",
+        "row": 0,
+        "col": 0,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "number of candidates",
+        "row": 0,
+        "col": 1,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "total votes",
+        "row": 0,
+        "col": 2,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "average voters per candidate",
+        "row": 0,
+        "col": 3,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "percentage of vote",
+        "row": 0,
+        "col": 4,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "saved deposits",
+        "row": 0,
+        "col": 5,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "change (percentage points)",
+        "row": 0,
+        "col": 6,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "number of mps",
+        "row": 0,
+        "col": 7,
+        "dtype": "text",
+        "dtype_detail": {}
+      }
+    ],
+    "num_rows": 10,
+    "num_cols": 8
+  },
+  {
+    "sheet_id": "tableinstruct_8ccbf14893b5a39f42ca5b90283458::Sheet1",
+    "source": "HiTab",
+    "headers": [
+      {
+        "text": "2013 / 14",
+        "row": 0,
+        "col": 0,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "2012 / 13",
+        "row": 0,
+        "col": 1,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "2011 / 12",
+        "row": 0,
+        "col": 2,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "2010 / 11",
+        "row": 0,
+        "col": 3,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "institute",
+        "row": 0,
+        "col": 4,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "region",
+        "row": 0,
+        "col": 5,
+        "dtype": "text",
+        "dtype_detail": {}
+      }
+    ],
+    "num_rows": 47,
+    "num_cols": 6
+  },
+  {
+    "sheet_id": "tableinstruct_e86f29646ac80a7775431c9766f25d::Sheet1",
+    "source": "HiTab",
+    "headers": [
+      {
+        "text": "Particulars",
+        "row": 0,
+        "col": 0,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "Total",
+        "row": 0,
+        "col": 1,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "Male",
+        "row": 0,
+        "col": 2,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "Female",
+        "row": 0,
+        "col": 3,
+        "dtype": "text",
+        "dtype_detail": {}
+      }
+    ],
+    "num_rows": 9,
+    "num_cols": 4
+  },
+  {
+    "sheet_id": "tableinstruct_b3d94bbe70f8dcb728f359f04499f9::Sheet1",
+    "source": "HiTab",
+    "headers": [
+      {
+        "text": "party",
+        "row": 0,
+        "col": 0,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "administrative panel",
+        "row": 0,
+        "col": 1,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "agricultural panel",
+        "row": 0,
+        "col": 2,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "cultural and educational panel",
+        "row": 0,
+        "col": 3,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "industrial and commercial panel",
+        "row": 0,
+        "col": 4,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "labour panel",
+        "row": 0,
+        "col": 5,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "national university of ireland",
+        "row": 0,
+        "col": 6,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "university of dublin",
+        "row": 0,
+        "col": 7,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "nominated by the taoiseach",
+        "row": 0,
+        "col": 8,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "total",
+        "row": 0,
+        "col": 9,
+        "dtype": "text",
+        "dtype_detail": {}
+      }
+    ],
+    "num_rows": 7,
+    "num_cols": 10
+  },
+  {
+    "sheet_id": "tableinstruct_9c32fa38ff32f4ea9c7c07d8a8e81c::Sheet1",
+    "source": "HiTab",
+    "headers": [
+      {
+        "text": "week",
+        "row": 0,
+        "col": 0,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "player",
+        "row": 0,
+        "col": 1,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "team",
+        "row": 0,
+        "col": 2,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "opponent",
+        "row": 0,
+        "col": 3,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "carries",
+        "row": 0,
+        "col": 4,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "yards",
+        "row": 0,
+        "col": 5,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "average",
+        "row": 0,
+        "col": 6,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "touchdowns",
+        "row": 0,
+        "col": 7,
+        "dtype": "text",
+        "dtype_detail": {}
+      }
+    ],
+    "num_rows": 16,
+    "num_cols": 8
+  },
+  {
+    "sheet_id": "tableinstruct_8aa86c62b1b0c1b98e2f7c08601cd3::Sheet1",
+    "source": "HiTab",
+    "headers": [
+      {
+        "text": "Rank",
+        "row": 0,
+        "col": 0,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "Circuit",
+        "row": 0,
+        "col": 1,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "Headquarters",
+        "row": 0,
+        "col": 2,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "Screens",
+        "row": 0,
+        "col": 3,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "Sites",
+        "row": 0,
+        "col": 4,
+        "dtype": "text",
+        "dtype_detail": {}
+      }
+    ],
+    "num_rows": 10,
+    "num_cols": 5
+  },
+  {
+    "sheet_id": "tableinstruct_c600754a6c3d58bd2c83fff992ce9d::Sheet1",
+    "source": "HiTab",
+    "headers": [
+      {
+        "text": "Finish",
+        "row": 0,
+        "col": 0,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "Driver",
+        "row": 0,
+        "col": 1,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "Races",
+        "row": 0,
+        "col": 2,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "Wins",
+        "row": 0,
+        "col": 3,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "Poles",
+        "row": 0,
+        "col": 4,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "Points",
+        "row": 0,
+        "col": 5,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "Earnings",
+        "row": 0,
+        "col": 6,
+        "dtype": "text",
+        "dtype_detail": {}
+      }
+    ],
+    "num_rows": 10,
+    "num_cols": 7
+  },
+  {
+    "sheet_id": "tableinstruct_b556a17dd08b50df5400baf509eb1f::Sheet1",
+    "source": "HiTab",
+    "headers": [
+      {
+        "text": "elections",
+        "row": 0,
+        "col": 0,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "date",
+        "row": 0,
+        "col": 1,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "people who could vote",
+        "row": 0,
+        "col": 2,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "number of votes",
+        "row": 0,
+        "col": 3,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "participation percentage",
+        "row": 0,
+        "col": 4,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "number of candidates",
+        "row": 0,
+        "col": 5,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "selected president",
+        "row": 0,
+        "col": 6,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "number of votes.1",
+        "row": 0,
+        "col": 7,
+        "dtype": "text",
+        "dtype_detail": {}
+      },
+      {
+        "text": "percentage of vote",
+        "row": 0,
+        "col": 8,
+        "dtype": "text",
+        "dtype_detail": {}
+      }
+    ],
+    "num_rows": 10,
+    "num_cols": 9
+  }
+]
