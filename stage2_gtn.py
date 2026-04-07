@@ -20,6 +20,7 @@ import json
 import os
 import random
 import time
+import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -86,14 +87,24 @@ def reduce_mean(value: float, device: torch.device) -> float:
     t /= get_world_size()
     return t.item()
 
+def compute_binary_entropy_mean(logits: torch.Tensor, node_mask: torch.Tensor) -> float:
+    probs = torch.sigmoid(logits).clamp(min=1e-10, max=1 - 1e-10)
+    entropy = -(probs * torch.log(probs) + (1 - probs) * torch.log(1 - probs)) / math.log(2.0)
+    entropy = entropy * node_mask
+    return float(entropy.sum().item() / node_mask.sum().clamp(min=1.0).item())
+
 
 @dataclass
 class EvalMetrics:
     loss: float
+    precision: float
+    recall: float
+    f1: float
     recall_at_1: float
     recall_at_3: float
-    f1: float
     subset_acc: float
+    node_acc: float
+    entropy: float
 
 
 class SheetTextSerializer:
@@ -840,12 +851,18 @@ class Trainer:
     def compute_metrics(self, logits: torch.Tensor, labels: torch.Tensor, node_mask: torch.Tensor) -> Dict[str, float]:
         probs = torch.sigmoid(logits)
         pred = (probs >= self.args.activation_threshold).float() * node_mask
-        tp = ((pred == 1) & (labels == 1) & (node_mask == 1)).sum().item()
-        fp = ((pred == 1) & (labels == 0) & (node_mask == 1)).sum().item()
-        fn = ((pred == 0) & (labels == 1) & (node_mask == 1)).sum().item()
+        valid = node_mask > 0.5
+
+        tp = ((pred == 1) & (labels == 1) & valid).sum().item()
+        fp = ((pred == 1) & (labels == 0) & valid).sum().item()
+        fn = ((pred == 0) & (labels == 1) & valid).sum().item()
+        tn = ((pred == 0) & (labels == 0) & valid).sum().item()
+
         precision = tp / max(tp + fp, 1)
         recall = tp / max(tp + fn, 1)
         f1 = 2 * precision * recall / max(precision + recall, 1e-9)
+        node_acc = (tp + tn) / max(tp + tn + fp + fn, 1)
+        entropy = compute_binary_entropy_mean(logits, node_mask)
 
         subset_acc_sum = 0.0
         recall1_sum = 0.0
@@ -873,11 +890,13 @@ class Trainer:
             "subset_acc": subset_acc_sum / max(bsz, 1),
             "recall_at_1": recall1_sum / max(bsz, 1),
             "recall_at_3": recall3_sum / max(bsz, 1),
+            "node_acc": node_acc,
+            "entropy": entropy,
         }
-
     def evaluate(self, eval_loader) -> EvalMetrics:
         self.model.eval()
-        total_loss = total_r1 = total_r3 = total_f1 = total_subset = 0.0
+        total_loss = total_precision = total_recall = total_r1 = total_r3 = 0.0
+        total_f1 = total_subset = total_node_acc = total_entropy = 0.0
         steps = 0
         with torch.no_grad():
             for batch in eval_loader:
@@ -896,24 +915,35 @@ class Trainer:
                 loss, _ = self.loss_fn(outputs, batch["labels"], batch["node_mask"])
                 metrics = self.compute_metrics(outputs["logits"], batch["labels"], batch["node_mask"])
                 total_loss += loss.item()
+                total_precision += metrics["precision"]
+                total_recall += metrics["recall"]
                 total_r1 += metrics["recall_at_1"]
                 total_r3 += metrics["recall_at_3"]
                 total_f1 += metrics["f1"]
                 total_subset += metrics["subset_acc"]
+                total_node_acc += metrics["node_acc"]
+                total_entropy += metrics["entropy"]
                 steps += 1
         avg_loss = total_loss / max(steps, 1)
+        avg_precision = total_precision / max(steps, 1)
+        avg_recall = total_recall / max(steps, 1)
         avg_r1 = total_r1 / max(steps, 1)
         avg_r3 = total_r3 / max(steps, 1)
         avg_f1 = total_f1 / max(steps, 1)
         avg_subset = total_subset / max(steps, 1)
+        avg_node_acc = total_node_acc / max(steps, 1)
+        avg_entropy = total_entropy / max(steps, 1)
         return EvalMetrics(
             loss=reduce_mean(avg_loss, self.device),
+            precision=reduce_mean(avg_precision, self.device),
+            recall=reduce_mean(avg_recall, self.device),
+            f1=reduce_mean(avg_f1, self.device),
             recall_at_1=reduce_mean(avg_r1, self.device),
             recall_at_3=reduce_mean(avg_r3, self.device),
-            f1=reduce_mean(avg_f1, self.device),
             subset_acc=reduce_mean(avg_subset, self.device),
+            node_acc=reduce_mean(avg_node_acc, self.device),
+            entropy=reduce_mean(avg_entropy, self.device),
         )
-
     def train(self) -> None:
         train_loader, eval_loader, train_sampler = self.prepare_data()
         self.log(f"Train size: {len(self.train_dataset)} | Eval size: {len(self.eval_dataset)} | Graph mode: {self.args.graph_mode}")
@@ -933,7 +963,14 @@ class Trainer:
                 train_sampler.set_epoch(epoch)
             self.model.train()
             epoch_loss = 0.0
+            epoch_precision = 0.0
+            epoch_recall = 0.0
+            epoch_f1 = 0.0
+            epoch_r1 = 0.0
             epoch_r3 = 0.0
+            epoch_subset = 0.0
+            epoch_node_acc = 0.0
+            epoch_entropy = 0.0
             steps = 0
             t0 = time.time()
             for batch in train_loader:
@@ -959,34 +996,71 @@ class Trainer:
 
                 metrics = self.compute_metrics(outputs["logits"], batch["labels"], batch["node_mask"])
                 epoch_loss += loss.item()
+                epoch_precision += metrics["precision"]
+                epoch_recall += metrics["recall"]
+                epoch_f1 += metrics["f1"]
+                epoch_r1 += metrics["recall_at_1"]
                 epoch_r3 += metrics["recall_at_3"]
+                epoch_subset += metrics["subset_acc"]
+                epoch_node_acc += metrics["node_acc"]
+                epoch_entropy += metrics["entropy"]
                 steps += 1
                 if self.tb_writer is not None and is_main_process():
                     self.tb_writer.add_scalar("train/loss_step", loss.item(), global_step)
+                    self.tb_writer.add_scalar("train/precision_step", metrics["precision"], global_step)
+                    self.tb_writer.add_scalar("train/recall_step", metrics["recall"], global_step)
+                    self.tb_writer.add_scalar("train/f1_step", metrics["f1"], global_step)
+                    self.tb_writer.add_scalar("train/node_acc_step", metrics["node_acc"], global_step)
+                    self.tb_writer.add_scalar("train/entropy_step", metrics["entropy"], global_step)
+                    self.tb_writer.add_scalar("train/recall_at_1_step", metrics["recall_at_1"], global_step)
                     self.tb_writer.add_scalar("train/recall_at_3_step", metrics["recall_at_3"], global_step)
+                    self.tb_writer.add_scalar("train/subset_acc_step", metrics["subset_acc"], global_step)
                     self.tb_writer.add_scalar("train/loss_infonce_step", loss_stats["loss_infonce"], global_step)
+                    self.tb_writer.add_scalar("train/loss_bce_step", loss_stats["loss_bce"], global_step)
                     self.tb_writer.add_scalar("train/loss_align_step", loss_stats["loss_align"], global_step)
                     self.tb_writer.add_scalar("train/loss_subgraph_step", loss_stats["loss_subgraph"], global_step)
                 global_step += 1
 
             train_loss = reduce_mean(epoch_loss / max(steps, 1), self.device)
+            train_precision = reduce_mean(epoch_precision / max(steps, 1), self.device)
+            train_recall = reduce_mean(epoch_recall / max(steps, 1), self.device)
+            train_f1 = reduce_mean(epoch_f1 / max(steps, 1), self.device)
+            train_r1 = reduce_mean(epoch_r1 / max(steps, 1), self.device)
             train_r3 = reduce_mean(epoch_r3 / max(steps, 1), self.device)
+            train_subset = reduce_mean(epoch_subset / max(steps, 1), self.device)
+            train_node_acc = reduce_mean(epoch_node_acc / max(steps, 1), self.device)
+            train_entropy = reduce_mean(epoch_entropy / max(steps, 1), self.device)
             eval_metrics = self.evaluate(eval_loader)
             elapsed = time.time() - t0
             self.log(
                 f"Epoch {epoch + 1}/{self.args.num_epochs} | "
-                f"train_loss={train_loss:.4f} train_r3={train_r3:.4f} | "
-                f"eval_loss={eval_metrics.loss:.4f} eval_r1={eval_metrics.recall_at_1:.4f} "
-                f"eval_r3={eval_metrics.recall_at_3:.4f} eval_f1={eval_metrics.f1:.4f} subset_acc={eval_metrics.subset_acc:.4f} | "
-                f"time={elapsed:.1f}s"
+                f"train_loss={train_loss:.4f} train_p={train_precision:.4f} train_r={train_recall:.4f} "
+                f"train_f1={train_f1:.4f} train_acc={train_node_acc:.4f} train_entropy={train_entropy:.4f} "
+                f"train_r1={train_r1:.4f} train_r3={train_r3:.4f} train_subset={train_subset:.4f} | "
+                f"eval_loss={eval_metrics.loss:.4f} eval_p={eval_metrics.precision:.4f} "
+                f"eval_r={eval_metrics.recall:.4f} eval_f1={eval_metrics.f1:.4f} "
+                f"eval_acc={eval_metrics.node_acc:.4f} eval_entropy={eval_metrics.entropy:.4f} "
+                f"eval_r1={eval_metrics.recall_at_1:.4f} eval_r3={eval_metrics.recall_at_3:.4f} "
+                f"subset_acc={eval_metrics.subset_acc:.4f} | time={elapsed:.1f}s"
             )
             if self.tb_writer is not None and is_main_process():
                 self.tb_writer.add_scalar("epoch/train_loss", train_loss, epoch + 1)
+                self.tb_writer.add_scalar("epoch/train_precision", train_precision, epoch + 1)
+                self.tb_writer.add_scalar("epoch/train_recall", train_recall, epoch + 1)
+                self.tb_writer.add_scalar("epoch/train_f1", train_f1, epoch + 1)
+                self.tb_writer.add_scalar("epoch/train_node_acc", train_node_acc, epoch + 1)
+                self.tb_writer.add_scalar("epoch/train_entropy", train_entropy, epoch + 1)
+                self.tb_writer.add_scalar("epoch/train_recall_at_1", train_r1, epoch + 1)
                 self.tb_writer.add_scalar("epoch/train_recall_at_3", train_r3, epoch + 1)
+                self.tb_writer.add_scalar("epoch/train_subset_acc", train_subset, epoch + 1)
                 self.tb_writer.add_scalar("epoch/eval_loss", eval_metrics.loss, epoch + 1)
+                self.tb_writer.add_scalar("epoch/eval_precision", eval_metrics.precision, epoch + 1)
+                self.tb_writer.add_scalar("epoch/eval_recall", eval_metrics.recall, epoch + 1)
+                self.tb_writer.add_scalar("epoch/eval_f1", eval_metrics.f1, epoch + 1)
+                self.tb_writer.add_scalar("epoch/eval_node_acc", eval_metrics.node_acc, epoch + 1)
+                self.tb_writer.add_scalar("epoch/eval_entropy", eval_metrics.entropy, epoch + 1)
                 self.tb_writer.add_scalar("epoch/eval_recall_at_1", eval_metrics.recall_at_1, epoch + 1)
                 self.tb_writer.add_scalar("epoch/eval_recall_at_3", eval_metrics.recall_at_3, epoch + 1)
-                self.tb_writer.add_scalar("epoch/eval_f1", eval_metrics.f1, epoch + 1)
                 self.tb_writer.add_scalar("epoch/eval_subset_acc", eval_metrics.subset_acc, epoch + 1)
 
             metric = eval_metrics.recall_at_3
