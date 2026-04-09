@@ -1,7 +1,7 @@
+
 #!/bin/bash
 set -euo pipefail
 
-# Recommended placement:
 # repo_root/train_stage2_ddp.sh
 #
 # Usage:
@@ -10,7 +10,8 @@ set -euo pipefail
 #
 # Optional env overrides:
 #   CUDA_VISIBLE_DEVICES=0,1 bash train_stage2_ddp.sh gtn_lite
-#   STAGE1_CKPT=/path/to/classifier.pt bash train_stage2_ddp.sh full_gtn
+#   STAGE1_CKPT=/path/to/classifier.pt bash train_stage2_ddp.sh gtn_lite
+#   DATA_DIR=data bash train_stage2_ddp.sh gtn_lite
 
 source /root/miniconda3/etc/profile.d/conda.sh
 conda activate sheetagent
@@ -25,36 +26,37 @@ export OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}"
 
 GRAPH_MODE=${1:-gtn_lite}
 CURRENT_TIME=$(date +"%Y%m%d_%H%M%S")
-LOG_FILE="stage2_${GRAPH_MODE}_${CURRENT_TIME}.log"
 RUN_NAME="${GRAPH_MODE}_${CURRENT_TIME}"
+OUTPUT_DIR="outputs/stage2_gtn"
+LOG_DIR="${OUTPUT_DIR}/logs"
+LOG_FILE="${LOG_DIR}/${RUN_NAME}.log"
 
 MODEL_NAME="${MODEL_NAME:-local_models/models--bert-base-uncased/snapshots/86b5e0934494bd15c9632b12f734a8a67f723594}"
 DATA_DIR="${DATA_DIR:-data}"
 
-# Prefer the new Stage1 output path produced by the current Bi-Encoder trainer.
 if [[ -n "${STAGE1_CKPT:-}" ]]; then
   RESOLVED_STAGE1_CKPT="$STAGE1_CKPT"
-elif [[ -f "outputs/stage1_biencoder/best_model/classifier.pt" ]]; then
-  RESOLVED_STAGE1_CKPT="outputs/stage1_biencoder/best_model/classifier.pt"
 elif [[ -f "best_model/classifier.pt" ]]; then
   RESOLVED_STAGE1_CKPT="best_model/classifier.pt"
+elif [[ -f "final_model/classifier.pt" ]]; then
+  RESOLVED_STAGE1_CKPT="final_model/classifier.pt"
 else
   echo "ERROR: cannot find Stage1 checkpoint."
   echo "Expected one of:"
-  echo "  outputs/stage1_biencoder/best_model/classifier.pt"
   echo "  best_model/classifier.pt"
+  echo "  final_model/classifier.pt"
   echo "Or pass it explicitly:"
   echo "  STAGE1_CKPT=/path/to/classifier.pt bash train_stage2_ddp.sh ${GRAPH_MODE}"
   exit 1
 fi
 
-if [[ ! -f "${DATA_DIR}/nway_train.json" ]]; then
-  echo "ERROR: missing ${DATA_DIR}/nway_train.json"
+if [[ ! -f "${DATA_DIR}/query.json" ]]; then
+  echo "ERROR: missing ${DATA_DIR}/query.json"
   exit 1
 fi
 
-if [[ ! -f "${DATA_DIR}/nway_eval.json" ]]; then
-  echo "ERROR: missing ${DATA_DIR}/nway_eval.json"
+if [[ ! -f "${DATA_DIR}/sheets.json" ]]; then
+  echo "ERROR: missing ${DATA_DIR}/sheets.json"
   exit 1
 fi
 
@@ -63,6 +65,8 @@ import os
 print(len([x for x in os.environ.get("CUDA_VISIBLE_DEVICES","").split(",") if x.strip()]))
 PY
 )
+
+mkdir -p "${LOG_DIR}" "runs/stage2_gtn"
 
 {
   echo "=============================="
@@ -79,9 +83,12 @@ PY
 nohup torchrun --nproc_per_node="${GPU_COUNT}" stage2_gtn.py \
   --graph-mode "$GRAPH_MODE" \
   --run-name "$RUN_NAME" \
+  --output-dir "$OUTPUT_DIR" \
   --data-dir "$DATA_DIR" \
+  --features-file "${DATA_DIR}/sheets.json" \
   --model-name "$MODEL_NAME" \
   --stage1-checkpoint "$RESOLVED_STAGE1_CKPT" \
+  --freeze-backbone \
   --use-tensorboard \
   --tensorboard-logdir runs/stage2_gtn \
   --num-epochs 20 \
@@ -91,15 +98,11 @@ nohup torchrun --nproc_per_node="${GPU_COUNT}" stage2_gtn.py \
   --max-query-length 64 \
   --max-workspace-size 10 \
   --max-header-texts 12 \
-  --include-shape-feature \
-  --include-source-feature \
   --embedding-strategy cls \
   --normalize-embeddings \
   --num-gat-layers 1 \
   --tau 0.07 \
   --lambda-align 0.10 \
-  --lambda-subgraph 0.05 \
-  --bce-weight 1.0 \
   >> "$LOG_FILE" 2>&1 &
 
 PID=$!

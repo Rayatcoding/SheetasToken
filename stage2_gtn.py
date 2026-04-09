@@ -1,26 +1,23 @@
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Stage2 GTN-lite / Full-GTN training with DDP support.
+Stage2 positive-only training with DDP support.
 
-Recommended placement:
-repo_root/stage2_gtn.py
-
-Expected data files under --data-dir:
-- nway_train.json
-- nway_eval.json
-- sheet_features_train.json / sheet_features_eval.json / sheet_features.json
-
-Works with the Stage1 biencoder_model.py replacement. It reuses the same HF backbone
-family and can optionally load Stage1 weights from best_model/final_model/classifier.pt.
+This version is aligned with the current Stage1 setup:
+- reads data/query.json
+- reads data/sheets.json
+- uses Stage1 encoder weights from classifier.pt
+- freezes Stage1 backbone during Stage2 training
+- only uses positive sheets for each query
 """
 
 import argparse
 import json
+import math
 import os
 import random
 import time
-import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -30,7 +27,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import AdamW
-from torch.utils.data import DataLoader, Dataset, DistributedSampler
+from torch.utils.data import DataLoader, Dataset, DistributedSampler, random_split
 from torch.utils.tensorboard import SummaryWriter
 from transformers import AutoModel, AutoTokenizer, get_linear_schedule_with_warmup
 
@@ -79,6 +76,14 @@ def cleanup_distributed() -> None:
         dist.destroy_process_group()
 
 
+def all_gather_tensor(t: torch.Tensor) -> torch.Tensor:
+    if not is_dist():
+        return t
+    gathered = [torch.zeros_like(t) for _ in range(get_world_size())]
+    dist.all_gather(gathered, t)
+    return torch.cat(gathered, dim=0)
+
+
 def reduce_mean(value: float, device: torch.device) -> float:
     if not is_dist():
         return float(value)
@@ -87,24 +92,13 @@ def reduce_mean(value: float, device: torch.device) -> float:
     t /= get_world_size()
     return t.item()
 
-def compute_binary_entropy_mean(logits: torch.Tensor, node_mask: torch.Tensor) -> float:
-    probs = torch.sigmoid(logits).clamp(min=1e-10, max=1 - 1e-10)
-    entropy = -(probs * torch.log(probs) + (1 - probs) * torch.log(1 - probs)) / math.log(2.0)
-    entropy = entropy * node_mask
-    return float(entropy.sum().item() / node_mask.sum().clamp(min=1.0).item())
-
 
 @dataclass
 class EvalMetrics:
     loss: float
-    precision: float
-    recall: float
-    f1: float
-    recall_at_1: float
-    recall_at_3: float
-    subset_acc: float
-    node_acc: float
-    entropy: float
+    retrieval_acc: float
+    mean_pos_cos: float
+    mean_set_cos: float
 
 
 class SheetTextSerializer:
@@ -113,56 +107,59 @@ class SheetTextSerializer:
         sheet_feature_map: Dict[str, Dict],
         max_header_texts: int = 12,
         include_shape_feature: bool = True,
-        include_source_feature: bool = True,
     ) -> None:
         self.sheet_feature_map = sheet_feature_map
         self.max_header_texts = max_header_texts
         self.include_shape_feature = include_shape_feature
-        self.include_source_feature = include_source_feature
 
     def to_text(self, sheet_id: str) -> str:
-        feat = self.sheet_feature_map.get(sheet_id)
+        feat = self.sheet_feature_map.get(str(sheet_id))
         if not feat:
-            return str(sheet_id)
+            return f"sheet_id: {sheet_id}"
+
         segments: List[str] = []
-        if self.include_source_feature and feat.get("source"):
-            segments.append(f"source: {feat['source']}")
+        name = feat.get("name")
+        if name:
+            segments.append(f"name: {name}")
+
         if self.include_shape_feature:
             nr = feat.get("num_rows", "?")
             nc = feat.get("num_cols", "?")
-            segments.append(f"shape: {nr}x{nc}")
-        headers = feat.get("headers", [])
-        header_texts: List[str] = []
-        for h in headers[: self.max_header_texts]:
-            txt = str(h.get("text", "")).strip() if isinstance(h, dict) else str(h).strip()
-            if txt:
-                header_texts.append(txt)
-        if header_texts:
-            segments.append("headers: " + " | ".join(header_texts))
-        return " ; ".join(segments) if segments else str(sheet_id)
+            segments.append(f"shape: {nr} x {nc}")
+
+        columns = feat.get("columns", [])
+        column_names: List[str] = []
+        for col in columns[: self.max_header_texts]:
+            if isinstance(col, dict):
+                col_name = str(col.get("name", "")).strip()
+            else:
+                col_name = str(col).strip()
+            if col_name:
+                column_names.append(col_name)
+        if column_names:
+            segments.append("columns: " + " | ".join(column_names))
+
+        return " ; ".join(segments) if segments else f"sheet_id: {sheet_id}"
 
     def header_set(self, sheet_id: str) -> set:
-        feat = self.sheet_feature_map.get(sheet_id)
-        if not feat:
-            return set()
-        headers = feat.get("headers", [])
+        feat = self.sheet_feature_map.get(str(sheet_id), {})
+        columns = feat.get("columns", [])
         out = set()
-        for h in headers[: self.max_header_texts]:
-            txt = str(h.get("text", "")).strip().lower() if isinstance(h, dict) else str(h).strip().lower()
+        for col in columns[: self.max_header_texts]:
+            if isinstance(col, dict):
+                txt = str(col.get("name", "")).strip().lower()
+            else:
+                txt = str(col).strip().lower()
             if txt:
                 out.add(txt)
         return out
 
-    def source(self, sheet_id: str) -> str:
-        feat = self.sheet_feature_map.get(sheet_id, {})
-        return str(feat.get("source", ""))
-
     def shape(self, sheet_id: str) -> Tuple[float, float]:
-        feat = self.sheet_feature_map.get(sheet_id, {})
+        feat = self.sheet_feature_map.get(str(sheet_id), {})
         return float(feat.get("num_rows", 0.0) or 0.0), float(feat.get("num_cols", 0.0) or 0.0)
 
 
-class NWayDataset(Dataset):
+class PositiveQueryDataset(Dataset):
     def __init__(
         self,
         data_dir: str,
@@ -174,7 +171,8 @@ class NWayDataset(Dataset):
         features_file: Optional[str] = None,
         max_header_texts: int = 12,
         include_shape_feature: bool = True,
-        include_source_feature: bool = True,
+        eval_ratio: float = 0.1,
+        sample_seed: int = 42,
     ) -> None:
         self.data_dir = data_dir
         self.split = split
@@ -183,39 +181,28 @@ class NWayDataset(Dataset):
         self.max_query_length = max_query_length
         self.max_workspace_size = max_workspace_size
         self.features_file = features_file
+        self.eval_ratio = eval_ratio
+        self.sample_seed = sample_seed
         self.serializer = SheetTextSerializer(
             self._load_sheet_feature_map(),
             max_header_texts=max_header_texts,
             include_shape_feature=include_shape_feature,
-            include_source_feature=include_source_feature,
         )
         self.data = self._load_data()
 
-    def _split_to_filename(self) -> str:
-        return os.path.join(self.data_dir, f"{self.split}.json")
-
-    def _load_data(self) -> List[Dict]:
-        path = self._split_to_filename()
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"Missing dataset file: {path}")
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if not isinstance(data, list):
-            raise ValueError(f"{path} must contain a JSON list.")
-        return data
+    def _dataset_file(self) -> str:
+        return os.path.join(self.data_dir, "query.json")
 
     def _infer_features_file(self) -> Optional[str]:
         if self.features_file:
             return self.features_file
-        split_name = self.split
-        if split_name.startswith("nway_"):
-            split_name = split_name[len("nway_"):]
-        candidate = os.path.join(self.data_dir, f"sheet_features_{split_name}.json")
-        if os.path.exists(candidate):
-            return candidate
-        fallback = os.path.join(self.data_dir, "sheet_features.json")
-        if os.path.exists(fallback):
-            return fallback
+        candidates = [
+            os.path.join(self.data_dir, "sheets.json"),
+            os.path.join(self.data_dir, "sheet_features.json"),
+        ]
+        for path in candidates:
+            if os.path.exists(path):
+                return path
         return None
 
     def _load_sheet_feature_map(self) -> Dict[str, Dict]:
@@ -224,12 +211,62 @@ class NWayDataset(Dataset):
             return {}
         with open(path, "r", encoding="utf-8") as f:
             raw = json.load(f)
-        out = {}
-        for item in raw:
-            sid = item.get("sheet_id")
-            if sid:
-                out[sid] = item
+        out: Dict[str, Dict] = {}
+        if isinstance(raw, dict):
+            for key, item in raw.items():
+                if not isinstance(item, dict):
+                    continue
+                sid = item.get("sheet_id", key)
+                if sid is None:
+                    continue
+                out[str(sid)] = item
+        elif isinstance(raw, list):
+            for item in raw:
+                if not isinstance(item, dict):
+                    continue
+                sid = item.get("sheet_id")
+                if sid is None:
+                    continue
+                out[str(sid)] = item
+        else:
+            raise ValueError(f"Unsupported sheets format: {type(raw)}")
         return out
+
+    def _load_all_queries(self) -> List[Dict]:
+        path = self._dataset_file()
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Missing dataset file: {path}")
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            raise ValueError(f"{path} must contain a JSON list.")
+        cleaned = []
+        for item in data:
+            q = str(item.get("query", "")).strip()
+            sheet_ids = [str(x) for x in item.get("sheet_ids", []) if str(x) in self.serializer.sheet_feature_map]
+            if q and sheet_ids:
+                cleaned.append({"query": q, "sheet_ids": sheet_ids})
+        if not cleaned:
+            raise ValueError("No valid samples found in query.json after filtering.")
+        return cleaned
+
+    def _load_data(self) -> List[Dict]:
+        all_items = self._load_all_queries()
+        n = len(all_items)
+        eval_size = max(1, int(n * self.eval_ratio))
+        if eval_size >= n:
+            eval_size = 1
+        train_size = n - eval_size
+        rng = random.Random(self.sample_seed)
+        indices = list(range(n))
+        rng.shuffle(indices)
+        if self.split == "nway_train":
+            chosen = indices[:train_size]
+        elif self.split == "nway_eval":
+            chosen = indices[train_size:]
+        else:
+            raise ValueError(f"Unsupported split: {self.split}")
+        return [all_items[i] for i in chosen]
 
     def __len__(self) -> int:
         return len(self.data)
@@ -250,39 +287,74 @@ class NWayDataset(Dataset):
             out["token_type_ids"] = enc["token_type_ids"].squeeze(0)
         return out
 
+    def _build_schema_prior(self, sheet_ids: List[str], node_mask: torch.Tensor) -> torch.Tensor:
+        n = len(sheet_ids)
+        adj = torch.zeros(self.max_workspace_size, self.max_workspace_size, dtype=torch.float)
+        for i in range(n):
+            hi = self.serializer.header_set(sheet_ids[i])
+            for j in range(n):
+                if i == j:
+                    continue
+                hj = self.serializer.header_set(sheet_ids[j])
+                if not hi and not hj:
+                    score = 0.0
+                else:
+                    inter = len(hi & hj)
+                    union = max(len(hi | hj), 1)
+                    score = inter / union
+                adj[i, j] = score
+        valid_pair = node_mask.unsqueeze(0) * node_mask.unsqueeze(1)
+        return adj * valid_pair
+
+    def _build_shape_prior(self, sheet_ids: List[str], node_mask: torch.Tensor) -> torch.Tensor:
+        n = len(sheet_ids)
+        adj = torch.zeros(self.max_workspace_size, self.max_workspace_size, dtype=torch.float)
+        shapes = [self.serializer.shape(sid) for sid in sheet_ids]
+        for i in range(n):
+            r1, c1 = shapes[i]
+            for j in range(n):
+                if i == j:
+                    continue
+                r2, c2 = shapes[j]
+                row_sim = 1.0 / (1.0 + abs(r1 - r2))
+                col_sim = 1.0 / (1.0 + abs(c1 - c2))
+                adj[i, j] = 0.5 * (row_sim + col_sim)
+        valid_pair = node_mask.unsqueeze(0) * node_mask.unsqueeze(1)
+        return adj * valid_pair
+
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         item = self.data[idx]
         query_text = item["query"]
-        workspace = item["workspace"][: self.max_workspace_size]
-        relevant = set(item.get("relevant_subset", []))
+        positive_sheet_ids = item["sheet_ids"][: self.max_workspace_size]
 
         q = self._encode_text(query_text, self.max_query_length)
 
         ws_input_ids = []
         ws_attention_mask = []
         ws_token_type_ids = []
-        node_mask = []
-        labels = []
+        node_mask_list = []
         sheet_ids = []
 
         for i in range(self.max_workspace_size):
-            if i < len(workspace):
-                sid = workspace[i]
+            if i < len(positive_sheet_ids):
+                sid = positive_sheet_ids[i]
                 text = self.serializer.to_text(sid)
                 enc = self._encode_text(text, self.max_length)
                 ws_input_ids.append(enc["input_ids"])
                 ws_attention_mask.append(enc["attention_mask"])
                 ws_token_type_ids.append(enc.get("token_type_ids", torch.zeros_like(enc["input_ids"])))
-                node_mask.append(1.0)
-                labels.append(1.0 if sid in relevant else 0.0)
+                node_mask_list.append(1.0)
                 sheet_ids.append(sid)
             else:
                 ws_input_ids.append(torch.zeros(self.max_length, dtype=torch.long))
                 ws_attention_mask.append(torch.zeros(self.max_length, dtype=torch.long))
                 ws_token_type_ids.append(torch.zeros(self.max_length, dtype=torch.long))
-                node_mask.append(0.0)
-                labels.append(0.0)
+                node_mask_list.append(0.0)
                 sheet_ids.append("")
+
+        node_mask = torch.tensor(node_mask_list, dtype=torch.float)
+        schema_prior = self._build_schema_prior(positive_sheet_ids, node_mask)
+        shape_prior = self._build_shape_prior(positive_sheet_ids, node_mask)
 
         return {
             "query_input_ids": q["input_ids"],
@@ -291,8 +363,9 @@ class NWayDataset(Dataset):
             "workspace_input_ids": torch.stack(ws_input_ids, dim=0),
             "workspace_attention_mask": torch.stack(ws_attention_mask, dim=0),
             "workspace_token_type_ids": torch.stack(ws_token_type_ids, dim=0),
-            "node_mask": torch.tensor(node_mask, dtype=torch.float),
-            "labels": torch.tensor(labels, dtype=torch.float),
+            "node_mask": node_mask,
+            "schema_prior": schema_prior,
+            "shape_prior": shape_prior,
             "sheet_ids": sheet_ids,
         }
 
@@ -437,10 +510,9 @@ class DenseGATLayer(nn.Module):
 
 
 class AdjacencyBuilder(nn.Module):
-    def __init__(self, mode: str = "gtn_lite", dropout: float = 0.1) -> None:
+    def __init__(self, mode: str = "gtn_lite") -> None:
         super().__init__()
         self.mode = mode
-        self.dropout = nn.Dropout(dropout)
         self.num_channels = 4
         if mode == "gtn_lite":
             self.channel_logits = nn.Parameter(torch.zeros(self.num_channels))
@@ -459,25 +531,23 @@ class AdjacencyBuilder(nn.Module):
         row_sum = adj.sum(dim=-1, keepdim=True).clamp(min=1e-9)
         return adj / row_sum
 
-    def forward(self, channels: torch.Tensor, node_mask: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
-        # channels: (B, K, N, N)
+    def forward(self, channels: torch.Tensor, node_mask: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         if self.mode == "gtn_lite":
             w = torch.softmax(self.channel_logits, dim=0)
             fused = (channels * w.view(1, -1, 1, 1)).sum(dim=1)
             fused = F.relu(fused)
             fused = self._row_normalize(fused, node_mask)
             aux = {"channel_weights": w.detach()}
-            return fused, fused, aux
+            return fused, aux
 
         w1 = torch.softmax(self.channel_logits_q1, dim=0)
         w2 = torch.softmax(self.channel_logits_q2, dim=0)
         q1 = (channels * w1.view(1, -1, 1, 1)).sum(dim=1)
         q2 = (channels * w2.view(1, -1, 1, 1)).sum(dim=1)
-        meta = torch.bmm(F.relu(q1), F.relu(q2))
-        meta = self._row_normalize(meta, node_mask)
-        prior = self._row_normalize(F.relu(q1), node_mask)
+        fused = torch.bmm(F.relu(q1), F.relu(q2))
+        fused = self._row_normalize(fused, node_mask)
         aux = {"channel_weights_q1": w1.detach(), "channel_weights_q2": w2.detach()}
-        return meta, prior, aux
+        return fused, aux
 
 
 class Stage2GTNModel(nn.Module):
@@ -494,7 +564,7 @@ class Stage2GTNModel(nn.Module):
         normalize_embeddings: bool = True,
         graph_dropout: float = 0.1,
         num_gat_layers: int = 1,
-        freeze_backbone: bool = False,
+        freeze_backbone: bool = True,
     ) -> None:
         super().__init__()
         self.encoder = TextBiEncoder(
@@ -510,15 +580,13 @@ class Stage2GTNModel(nn.Module):
         dim = self.encoder.embedding_dim
         self.query_proj = nn.Sequential(nn.Linear(dim, dim), nn.GELU(), nn.LayerNorm(dim))
         self.node_proj = nn.Sequential(nn.Linear(dim, dim), nn.GELU(), nn.LayerNorm(dim))
-        self.adj_builder = AdjacencyBuilder(mode=graph_mode, dropout=graph_dropout)
+        self.adj_builder = AdjacencyBuilder(mode=graph_mode)
         self.gat_layers = nn.ModuleList([DenseGATLayer(dim, dropout=graph_dropout) for _ in range(num_gat_layers)])
-        self.scorer = nn.Sequential(
-            nn.Linear(dim * 4, dim),
+        self.set_gate = nn.Sequential(
+            nn.Linear(dim * 2, dim),
             nn.GELU(),
-            nn.Dropout(graph_dropout),
             nn.Linear(dim, 1),
         )
-        self.graph_mode = graph_mode
 
         if freeze_backbone:
             for p in self.encoder.backbone.parameters():
@@ -533,14 +601,18 @@ class Stage2GTNModel(nn.Module):
         mapped = {}
         for k, v in state_dict.items():
             if k.startswith("backbone."):
-                new_k = f"encoder.{k}"
+                new_k = f"backbone.{k[len('backbone.'):]}"
             else:
                 continue
             if new_k in encoder_state and encoder_state[new_k].shape == v.shape:
                 mapped[new_k] = v
-        missing, unexpected = self.load_state_dict(mapped, strict=False)
+        missing, unexpected = self.encoder.load_state_dict(mapped, strict=False)
         if is_main_process():
-            print(f"Loaded Stage1 backbone weights from {ckpt_path}; matched={len(mapped)} missing={len(missing)} unexpected={len(unexpected)}", flush=True)
+            print(
+                f"Loaded Stage1 backbone weights from {ckpt_path}; matched={len(mapped)} "
+                f"missing={len(missing)} unexpected={len(unexpected)}",
+                flush=True,
+            )
 
     def _build_channels(
         self,
@@ -548,8 +620,8 @@ class Stage2GTNModel(nn.Module):
         node_embs: torch.Tensor,
         node_mask: torch.Tensor,
         schema_prior: torch.Tensor,
-        source_prior: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        shape_prior: torch.Tensor,
+    ) -> torch.Tensor:
         norm_nodes = F.normalize(node_embs, dim=-1)
         q = F.normalize(query_emb, dim=-1)
 
@@ -560,10 +632,21 @@ class Stage2GTNModel(nn.Module):
         q_graph = torch.einsum("bi,bj->bij", q_sim, q_sim)
         q_graph = (q_graph + 1.0) * 0.5
 
-        channels = torch.stack([sem, q_graph, schema_prior, source_prior], dim=1)
+        channels = torch.stack([sem, q_graph, schema_prior, shape_prior], dim=1)
         valid_pair = node_mask.unsqueeze(1) * node_mask.unsqueeze(2)
         channels = channels * valid_pair.unsqueeze(1)
-        return channels, sem
+        return channels
+
+    def _pool_set(self, query_emb: torch.Tensor, node_embs: torch.Tensor, node_mask: torch.Tensor) -> torch.Tensor:
+        q_expand = query_emb.unsqueeze(1).expand_as(node_embs)
+        gate_in = torch.cat([node_embs, q_expand], dim=-1)
+        gate = self.set_gate(gate_in).squeeze(-1)
+        gate = gate.masked_fill(node_mask <= 0, -1e9)
+        attn = torch.softmax(gate, dim=-1)
+        attn = attn * node_mask
+        attn = attn / attn.sum(dim=-1, keepdim=True).clamp(min=1e-9)
+        set_emb = torch.bmm(attn.unsqueeze(1), node_embs).squeeze(1)
+        return F.normalize(set_emb, dim=-1)
 
     def forward(
         self,
@@ -573,7 +656,7 @@ class Stage2GTNModel(nn.Module):
         workspace_attention_mask: torch.Tensor,
         node_mask: torch.Tensor,
         schema_prior: torch.Tensor,
-        source_prior: torch.Tensor,
+        shape_prior: torch.Tensor,
         query_token_type_ids: Optional[torch.Tensor] = None,
         workspace_token_type_ids: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
@@ -587,135 +670,132 @@ class Stage2GTNModel(nn.Module):
         query_emb = self.query_proj(query_emb)
         node_embs = self.node_proj(node_embs) * node_mask.unsqueeze(-1)
 
-        channels, sem = self._build_channels(query_emb, node_embs, node_mask, schema_prior, source_prior)
-        graph_adj, align_prior, aux = self.adj_builder(channels, node_mask)
+        channels = self._build_channels(query_emb, node_embs, node_mask, schema_prior, shape_prior)
+        fused_adj, aux = self.adj_builder(channels, node_mask)
 
-        gat_attn = graph_adj
+        attn_maps = []
         h = node_embs
-        for layer in self.gat_layers:
-            h, gat_attn = layer(h, graph_adj, node_mask)
+        for gat in self.gat_layers:
+            h, alpha = gat(h, fused_adj, node_mask)
+            attn_maps.append(alpha)
 
-        q = query_emb.unsqueeze(1).expand_as(h)
-        feats = torch.cat([h, q, torch.abs(h - q), h * q], dim=-1)
-        logits = self.scorer(feats).squeeze(-1)
-        logits = logits.masked_fill(node_mask <= 0, -1e9)
+        set_emb = self._pool_set(query_emb, h, node_mask)
+        query_emb = F.normalize(query_emb, dim=-1)
+
+        node_cos = (h * query_emb.unsqueeze(1)).sum(dim=-1) * node_mask
+        set_cos = (query_emb * set_emb).sum(dim=-1)
+
         return {
             "query_emb": query_emb,
             "node_embs": h,
-            "logits": logits,
-            "gat_attn_weights": gat_attn,
-            "graph_adj": graph_adj,
-            "sheet_sim_scores": sem if self.graph_mode == "gtn_lite" else align_prior,
-            "channel_info": aux,
+            "set_emb": set_emb,
+            "node_cos": node_cos,
+            "set_cos": set_cos,
+            "fused_adj": fused_adj,
+            "attn_maps": attn_maps,
+            "aux": aux,
         }
 
 
-class AgentSheetStage2Loss(nn.Module):
-    def __init__(self, tau: float = 0.07, lambda_align: float = 0.1, lambda_subgraph: float = 0.05, bce_weight: float = 1.0) -> None:
+class Stage2Loss(nn.Module):
+    def __init__(self, tau: float = 0.07, lambda_align: float = 0.10) -> None:
         super().__init__()
         self.tau = tau
         self.lambda_align = lambda_align
-        self.lambda_subgraph = lambda_subgraph
-        self.bce_weight = bce_weight
 
-    def infonce_loss(self, query_emb: torch.Tensor, node_embs: torch.Tensor, labels: torch.Tensor, node_mask: torch.Tensor) -> torch.Tensor:
-        query_emb = F.normalize(query_emb, dim=-1)
-        node_embs = F.normalize(node_embs, dim=-1)
-        logits = torch.einsum("bd,bnd->bn", query_emb, node_embs) / self.tau
-        logits = logits.masked_fill(node_mask <= 0, -1e9)
-        total = query_emb.new_tensor(0.0)
-        count = 0
-        for b in range(query_emb.size(0)):
-            pos_mask = (labels[b] > 0.5) & (node_mask[b] > 0.5)
-            if pos_mask.sum() == 0:
-                continue
-            denom = torch.logsumexp(logits[b], dim=0)
-            pos_logits = logits[b][pos_mask]
-            total = total + (-pos_logits + denom).mean()
-            count += 1
-        if count == 0:
-            return total
-        return total / count
+    def forward(self, outputs: Dict[str, torch.Tensor], node_mask: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, float]]:
+        query_emb = outputs["query_emb"]
+        set_emb = outputs["set_emb"]
+        node_cos = outputs["node_cos"]
 
-    def alignment_loss(self, gat_attn_weights: torch.Tensor, sheet_sim_scores: torch.Tensor, node_mask: torch.Tensor) -> torch.Tensor:
-        valid_pair = node_mask.unsqueeze(1) * node_mask.unsqueeze(2)
-        eye = torch.eye(gat_attn_weights.size(-1), device=gat_attn_weights.device).unsqueeze(0)
-        valid_pair = valid_pair * (1 - eye)
-        diff = (gat_attn_weights - sheet_sim_scores.detach()) ** 2
-        return (diff * valid_pair).sum() / valid_pair.sum().clamp(min=1.0)
+        all_query = all_gather_tensor(query_emb)
+        all_set = all_gather_tensor(set_emb)
 
-    def subgraph_regularization(self, gat_attn_weights: torch.Tensor, labels: torch.Tensor, node_mask: torch.Tensor) -> torch.Tensor:
-        pos = (labels > 0.5).float() * node_mask
-        pos_pair = torch.einsum("bi,bj->bij", pos, pos)
-        eye = torch.eye(gat_attn_weights.size(-1), device=gat_attn_weights.device).unsqueeze(0)
-        pos_pair = pos_pair * (1 - eye)
-        if pos_pair.sum() <= 0:
-            return gat_attn_weights.new_tensor(0.0)
-        return -((gat_attn_weights * pos_pair).sum() / pos_pair.sum().clamp(min=1.0))
+        logits = torch.matmul(query_emb, all_set.transpose(0, 1)) / self.tau
+        start = get_rank() * query_emb.size(0)
+        targets = torch.arange(query_emb.size(0), device=query_emb.device) + start
+        loss_infonce = F.cross_entropy(logits, targets)
 
-    def bce_loss(self, logits: torch.Tensor, labels: torch.Tensor, node_mask: torch.Tensor) -> torch.Tensor:
-        loss = F.binary_cross_entropy_with_logits(logits, labels, reduction="none")
-        return (loss * node_mask).sum() / node_mask.sum().clamp(min=1.0)
+        denom = node_mask.sum(dim=-1).clamp(min=1.0)
+        mean_pos_cos = (node_cos * node_mask).sum(dim=-1) / denom
+        loss_align = (1.0 - mean_pos_cos).mean()
 
-    def forward(self, outputs: Dict[str, torch.Tensor], labels: torch.Tensor, node_mask: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, float]]:
-        loss_infonce = self.infonce_loss(outputs["query_emb"], outputs["node_embs"], labels, node_mask)
-        loss_bce = self.bce_loss(outputs["logits"], labels, node_mask)
-        loss_align = self.alignment_loss(outputs["gat_attn_weights"], outputs["sheet_sim_scores"], node_mask)
-        loss_subgraph = self.subgraph_regularization(outputs["gat_attn_weights"], labels, node_mask)
-        total = loss_infonce + self.bce_weight * loss_bce + self.lambda_align * loss_align + self.lambda_subgraph * loss_subgraph
-        stats = {
-            "loss_infonce": float(loss_infonce.detach().item()),
-            "loss_bce": float(loss_bce.detach().item()),
-            "loss_align": float(loss_align.detach().item()),
-            "loss_subgraph": float(loss_subgraph.detach().item()),
+        loss = loss_infonce + self.lambda_align * loss_align
+
+        pred = logits.argmax(dim=-1)
+        retrieval_acc = (pred == targets).float().mean().item()
+
+        logs = {
+            "loss": float(loss.item()),
+            "loss_infonce": float(loss_infonce.item()),
+            "loss_align": float(loss_align.item()),
+            "retrieval_acc": float(retrieval_acc),
+            "mean_pos_cos": float(mean_pos_cos.mean().item()),
+            "mean_set_cos": float(outputs["set_cos"].mean().item()),
         }
-        return total, stats
+        return loss, logs
 
 
-class Trainer:
+class Stage2Trainer:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
         self.device = setup_distributed()
         self.local_rank = int(os.environ.get("LOCAL_RANK", 0))
-        self.rank = get_rank()
-        seed_everything(args.seed + self.rank)
+        seed_everything(args.seed + get_rank())
 
-        if not args.allow_download:
-            os.environ["TRANSFORMERS_OFFLINE"] = "1"
-            os.environ["HF_DATASETS_OFFLINE"] = "1"
-        else:
-            os.environ["TRANSFORMERS_OFFLINE"] = "0"
-            os.environ["HF_DATASETS_OFFLINE"] = "0"
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            args.model_name,
+            local_files_only=not args.allow_download,
+        )
 
-        self.tokenizer = AutoTokenizer.from_pretrained(args.model_name, local_files_only=not args.allow_download)
-        self.train_dataset = NWayDataset(
+        self.train_dataset = PositiveQueryDataset(
             data_dir=args.data_dir,
             split="nway_train",
             tokenizer=self.tokenizer,
             max_length=args.max_length,
             max_query_length=args.max_query_length,
             max_workspace_size=args.max_workspace_size,
-            features_file=args.train_features_file,
+            features_file=args.features_file,
             max_header_texts=args.max_header_texts,
-            include_shape_feature=args.include_shape_feature,
-            include_source_feature=args.include_source_feature,
+            include_shape_feature=not args.disable_shape_feature,
+            eval_ratio=args.eval_ratio,
+            sample_seed=args.seed,
         )
-        self.eval_dataset = NWayDataset(
+        self.eval_dataset = PositiveQueryDataset(
             data_dir=args.data_dir,
             split="nway_eval",
             tokenizer=self.tokenizer,
             max_length=args.max_length,
             max_query_length=args.max_query_length,
             max_workspace_size=args.max_workspace_size,
-            features_file=args.eval_features_file,
+            features_file=args.features_file,
             max_header_texts=args.max_header_texts,
-            include_shape_feature=args.include_shape_feature,
-            include_source_feature=args.include_source_feature,
+            include_shape_feature=not args.disable_shape_feature,
+            eval_ratio=args.eval_ratio,
+            sample_seed=args.seed,
         )
-        self.train_serializer = self.train_dataset.serializer
-        self.eval_serializer = self.eval_dataset.serializer
 
-        model = Stage2GTNModel(
+        self.train_sampler = DistributedSampler(self.train_dataset, shuffle=True) if is_dist() else None
+        self.eval_sampler = DistributedSampler(self.eval_dataset, shuffle=False) if is_dist() else None
+
+        self.train_loader = DataLoader(
+            self.train_dataset,
+            batch_size=args.batch_size,
+            shuffle=(self.train_sampler is None),
+            sampler=self.train_sampler,
+            num_workers=args.num_workers,
+            pin_memory=torch.cuda.is_available(),
+        )
+        self.eval_loader = DataLoader(
+            self.eval_dataset,
+            batch_size=args.batch_size,
+            shuffle=False,
+            sampler=self.eval_sampler,
+            num_workers=args.num_workers,
+            pin_memory=torch.cuda.is_available(),
+        )
+
+        self.model = Stage2GTNModel(
             model_name=args.model_name,
             graph_mode=args.graph_mode,
             local_files_only=not args.allow_download,
@@ -728,23 +808,32 @@ class Trainer:
             graph_dropout=args.graph_dropout,
             num_gat_layers=args.num_gat_layers,
             freeze_backbone=args.freeze_backbone,
-        ).to(self.device)
-        if args.stage1_checkpoint:
-            model.load_stage1_checkpoint(args.stage1_checkpoint)
+        )
+        self.model.load_stage1_checkpoint(args.stage1_checkpoint)
+        self.model.to(self.device)
+        self.raw_model = self.model
+        if is_dist():
+            self.model = DDP(self.model, device_ids=[self.local_rank] if self.device.type == "cuda" else None, find_unused_parameters=False)
 
-        if torch.cuda.is_available() and is_dist():
-            model = DDP(model, device_ids=[self.local_rank], output_device=self.local_rank, find_unused_parameters=False)
-        elif is_dist():
-            model = DDP(model)
-        self.model = model
-        self.loss_fn = AgentSheetStage2Loss(
+        self.loss_fn = Stage2Loss(
             tau=args.tau,
             lambda_align=args.lambda_align,
-            lambda_subgraph=args.lambda_subgraph,
-            bce_weight=args.bce_weight,
         )
-        self.run_dir = os.path.join(args.output_dir, args.run_name)
-        self.ckpt_dir = os.path.join(self.run_dir, "checkpoints")
+
+        self.optimizer = AdamW(
+            (p for p in self.raw_model.parameters() if p.requires_grad),
+            lr=args.learning_rate,
+            weight_decay=args.weight_decay,
+        )
+        total_steps = max(1, len(self.train_loader) * args.num_epochs)
+        warmup_steps = int(total_steps * args.warmup_ratio) if args.warmup_steps <= 0 else args.warmup_steps
+        self.scheduler = get_linear_schedule_with_warmup(
+            self.optimizer,
+            num_warmup_steps=warmup_steps,
+            num_training_steps=total_steps,
+        )
+
+        self.ckpt_dir = os.path.join(args.output_dir, args.run_name)
         self.tb_writer = None
         if is_main_process():
             os.makedirs(self.ckpt_dir, exist_ok=True)
@@ -753,94 +842,24 @@ class Trainer:
                 os.makedirs(tb_dir, exist_ok=True)
                 self.tb_writer = SummaryWriter(log_dir=tb_dir)
 
-    @property
-    def raw_model(self) -> Stage2GTNModel:
-        return self.model.module if isinstance(self.model, DDP) else self.model
-
-    def log(self, msg: str) -> None:
-        if is_main_process():
-            print(msg, flush=True)
-
-    def collate_fn(self, batch: List[Dict]) -> Dict[str, torch.Tensor]:
+    def _move_batch(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         out = {}
-        tensor_keys = [
-            "query_input_ids", "query_attention_mask", "query_token_type_ids",
-            "workspace_input_ids", "workspace_attention_mask", "workspace_token_type_ids",
-            "node_mask", "labels",
-        ]
-        for k in tensor_keys:
-            out[k] = torch.stack([item[k] for item in batch], dim=0)
-        out["sheet_ids"] = [item["sheet_ids"] for item in batch]
+        for k, v in batch.items():
+            if isinstance(v, torch.Tensor):
+                out[k] = v.to(self.device, non_blocking=True)
+            else:
+                out[k] = v
         return out
 
-    def build_priors(self, sheet_ids_batch: List[List[str]], serializer: SheetTextSerializer) -> Tuple[torch.Tensor, torch.Tensor]:
-        bsz = len(sheet_ids_batch)
-        n = len(sheet_ids_batch[0])
-        schema = torch.zeros(bsz, n, n, dtype=torch.float)
-        source = torch.zeros(bsz, n, n, dtype=torch.float)
-        for b, ids in enumerate(sheet_ids_batch):
-            header_sets = [serializer.header_set(sid) for sid in ids]
-            sources = [serializer.source(sid) for sid in ids]
-            shapes = [serializer.shape(sid) for sid in ids]
-            for i in range(n):
-                if not ids[i]:
-                    continue
-                for j in range(n):
-                    if i == j or not ids[j]:
-                        continue
-                    hi, hj = header_sets[i], header_sets[j]
-                    if hi or hj:
-                        inter = len(hi & hj)
-                        union = max(len(hi | hj), 1)
-                        schema[b, i, j] = inter / union
-                    same_source = 1.0 if sources[i] and sources[i] == sources[j] else 0.0
-                    r1, c1 = shapes[i]
-                    r2, c2 = shapes[j]
-                    shape_sim = 1.0 / (1.0 + abs(r1 - r2) + abs(c1 - c2))
-                    source[b, i, j] = max(same_source, shape_sim)
-        return schema, source
-
-    def prepare_data(self):
-        train_sampler = DistributedSampler(self.train_dataset, shuffle=True) if is_dist() else None
-        eval_sampler = DistributedSampler(self.eval_dataset, shuffle=False) if is_dist() else None
-        train_loader = DataLoader(
-            self.train_dataset,
-            batch_size=self.args.batch_size,
-            sampler=train_sampler,
-            shuffle=(train_sampler is None),
-            num_workers=self.args.num_workers,
-            pin_memory=torch.cuda.is_available(),
-            collate_fn=self.collate_fn,
-        )
-        eval_loader = DataLoader(
-            self.eval_dataset,
-            batch_size=self.args.batch_size,
-            sampler=eval_sampler,
-            shuffle=False,
-            num_workers=self.args.num_workers,
-            pin_memory=torch.cuda.is_available(),
-            collate_fn=self.collate_fn,
-        )
-        return train_loader, eval_loader, train_sampler
-
-    def _move_batch(self, batch: Dict[str, torch.Tensor], serializer: SheetTextSerializer) -> Dict[str, torch.Tensor]:
-        schema_prior, source_prior = self.build_priors(batch["sheet_ids"], serializer)
-        for k, v in list(batch.items()):
-            if isinstance(v, torch.Tensor):
-                batch[k] = v.to(self.device, non_blocking=True)
-        batch["schema_prior"] = schema_prior.to(self.device, non_blocking=True)
-        batch["source_prior"] = source_prior.to(self.device, non_blocking=True)
-        return batch
-
-    def save_checkpoint(self, name: str, optimizer, scheduler, epoch: int, best_metric: float) -> None:
+    def save_checkpoint(self, name: str, epoch: int, best_metric: float) -> None:
         if not is_main_process():
             return
         path = os.path.join(self.ckpt_dir, name)
         torch.save(
             {
                 "state_dict": self.raw_model.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "scheduler": scheduler.state_dict(),
+                "optimizer": self.optimizer.state_dict(),
+                "scheduler": self.scheduler.state_dict(),
                 "epoch": epoch,
                 "best_metric": best_metric,
                 "args": vars(self.args),
@@ -848,284 +867,178 @@ class Trainer:
             path,
         )
 
-    def compute_metrics(self, logits: torch.Tensor, labels: torch.Tensor, node_mask: torch.Tensor) -> Dict[str, float]:
-        probs = torch.sigmoid(logits)
-        pred = (probs >= self.args.activation_threshold).float() * node_mask
-        valid = node_mask > 0.5
+    def train_epoch(self, epoch: int) -> Dict[str, float]:
+        self.model.train()
+        if self.train_sampler is not None:
+            self.train_sampler.set_epoch(epoch)
 
-        tp = ((pred == 1) & (labels == 1) & valid).sum().item()
-        fp = ((pred == 1) & (labels == 0) & valid).sum().item()
-        fn = ((pred == 0) & (labels == 1) & valid).sum().item()
-        tn = ((pred == 0) & (labels == 0) & valid).sum().item()
+        total = {"loss": 0.0, "loss_infonce": 0.0, "loss_align": 0.0, "retrieval_acc": 0.0, "mean_pos_cos": 0.0, "mean_set_cos": 0.0}
+        steps = 0
 
-        precision = tp / max(tp + fp, 1)
-        recall = tp / max(tp + fn, 1)
-        f1 = 2 * precision * recall / max(precision + recall, 1e-9)
-        node_acc = (tp + tn) / max(tp + tn + fp + fn, 1)
-        entropy = compute_binary_entropy_mean(logits, node_mask)
+        iterable = self.train_loader
+        if is_main_process():
+            iterable = list(self.train_loader)
+        for batch in iterable:
+            batch = self._move_batch(batch)
+            outputs = self.model(
+                query_input_ids=batch["query_input_ids"],
+                query_attention_mask=batch["query_attention_mask"],
+                workspace_input_ids=batch["workspace_input_ids"],
+                workspace_attention_mask=batch["workspace_attention_mask"],
+                node_mask=batch["node_mask"],
+                schema_prior=batch["schema_prior"],
+                shape_prior=batch["shape_prior"],
+                query_token_type_ids=batch["query_token_type_ids"],
+                workspace_token_type_ids=batch["workspace_token_type_ids"],
+            )
+            loss, logs = self.loss_fn(outputs, batch["node_mask"])
 
-        subset_acc_sum = 0.0
-        recall1_sum = 0.0
-        recall3_sum = 0.0
-        bsz = logits.size(0)
-        for b in range(bsz):
-            valid_idx = (node_mask[b] > 0.5).nonzero(as_tuple=True)[0]
-            if valid_idx.numel() == 0:
-                continue
-            p = pred[b, valid_idx]
-            y = labels[b, valid_idx]
-            subset_acc_sum += float(torch.equal(p.cpu(), y.cpu()))
+            self.optimizer.zero_grad()
+            loss.backward()
+            if self.args.max_grad_norm > 0:
+                torch.nn.utils.clip_grad_norm_(self.raw_model.parameters(), self.args.max_grad_norm)
+            self.optimizer.step()
+            self.scheduler.step()
 
-            pos_idx = (y > 0.5).nonzero(as_tuple=True)[0]
-            if pos_idx.numel() > 0:
-                scores = probs[b, valid_idx]
-                top1 = torch.topk(scores, k=min(1, scores.numel())).indices
-                top3 = torch.topk(scores, k=min(3, scores.numel())).indices
-                recall1_sum += float((y[top1] > 0.5).any().item())
-                recall3_sum += float((y[top3] > 0.5).any().item())
-        return {
-            "precision": precision,
-            "recall": recall,
-            "f1": f1,
-            "subset_acc": subset_acc_sum / max(bsz, 1),
-            "recall_at_1": recall1_sum / max(bsz, 1),
-            "recall_at_3": recall3_sum / max(bsz, 1),
-            "node_acc": node_acc,
-            "entropy": entropy,
-        }
-    def evaluate(self, eval_loader) -> EvalMetrics:
+            for k in total:
+                total[k] += logs[k]
+            steps += 1
+
+        if steps == 0:
+            steps = 1
+        for k in total:
+            total[k] /= steps
+            total[k] = reduce_mean(total[k], self.device)
+        return total
+
+    def evaluate(self) -> EvalMetrics:
         self.model.eval()
-        total_loss = total_precision = total_recall = total_r1 = total_r3 = 0.0
-        total_f1 = total_subset = total_node_acc = total_entropy = 0.0
+        total = {"loss": 0.0, "retrieval_acc": 0.0, "mean_pos_cos": 0.0, "mean_set_cos": 0.0}
         steps = 0
         with torch.no_grad():
-            for batch in eval_loader:
-                batch = self._move_batch(batch, self.eval_serializer)
+            for batch in self.eval_loader:
+                batch = self._move_batch(batch)
                 outputs = self.model(
                     query_input_ids=batch["query_input_ids"],
                     query_attention_mask=batch["query_attention_mask"],
-                    query_token_type_ids=batch["query_token_type_ids"],
                     workspace_input_ids=batch["workspace_input_ids"],
                     workspace_attention_mask=batch["workspace_attention_mask"],
-                    workspace_token_type_ids=batch["workspace_token_type_ids"],
                     node_mask=batch["node_mask"],
                     schema_prior=batch["schema_prior"],
-                    source_prior=batch["source_prior"],
+                    shape_prior=batch["shape_prior"],
+                    query_token_type_ids=batch["query_token_type_ids"],
+                    workspace_token_type_ids=batch["workspace_token_type_ids"],
                 )
-                loss, _ = self.loss_fn(outputs, batch["labels"], batch["node_mask"])
-                metrics = self.compute_metrics(outputs["logits"], batch["labels"], batch["node_mask"])
-                total_loss += loss.item()
-                total_precision += metrics["precision"]
-                total_recall += metrics["recall"]
-                total_r1 += metrics["recall_at_1"]
-                total_r3 += metrics["recall_at_3"]
-                total_f1 += metrics["f1"]
-                total_subset += metrics["subset_acc"]
-                total_node_acc += metrics["node_acc"]
-                total_entropy += metrics["entropy"]
+                loss, logs = self.loss_fn(outputs, batch["node_mask"])
+                total["loss"] += logs["loss"]
+                total["retrieval_acc"] += logs["retrieval_acc"]
+                total["mean_pos_cos"] += logs["mean_pos_cos"]
+                total["mean_set_cos"] += logs["mean_set_cos"]
                 steps += 1
-        avg_loss = total_loss / max(steps, 1)
-        avg_precision = total_precision / max(steps, 1)
-        avg_recall = total_recall / max(steps, 1)
-        avg_r1 = total_r1 / max(steps, 1)
-        avg_r3 = total_r3 / max(steps, 1)
-        avg_f1 = total_f1 / max(steps, 1)
-        avg_subset = total_subset / max(steps, 1)
-        avg_node_acc = total_node_acc / max(steps, 1)
-        avg_entropy = total_entropy / max(steps, 1)
+
+        if steps == 0:
+            steps = 1
+        for k in total:
+            total[k] /= steps
+            total[k] = reduce_mean(total[k], self.device)
+
         return EvalMetrics(
-            loss=reduce_mean(avg_loss, self.device),
-            precision=reduce_mean(avg_precision, self.device),
-            recall=reduce_mean(avg_recall, self.device),
-            f1=reduce_mean(avg_f1, self.device),
-            recall_at_1=reduce_mean(avg_r1, self.device),
-            recall_at_3=reduce_mean(avg_r3, self.device),
-            subset_acc=reduce_mean(avg_subset, self.device),
-            node_acc=reduce_mean(avg_node_acc, self.device),
-            entropy=reduce_mean(avg_entropy, self.device),
+            loss=total["loss"],
+            retrieval_acc=total["retrieval_acc"],
+            mean_pos_cos=total["mean_pos_cos"],
+            mean_set_cos=total["mean_set_cos"],
         )
+
     def train(self) -> None:
-        train_loader, eval_loader, train_sampler = self.prepare_data()
-        self.log(f"Train size: {len(self.train_dataset)} | Eval size: {len(self.eval_dataset)} | Graph mode: {self.args.graph_mode}")
-
-        optimizer = AdamW((p for p in self.model.parameters() if p.requires_grad), lr=self.args.learning_rate, weight_decay=self.args.weight_decay)
-        total_steps = len(train_loader) * self.args.num_epochs
-        scheduler = get_linear_schedule_with_warmup(
-            optimizer,
-            num_warmup_steps=int(total_steps * self.args.warmup_ratio),
-            num_training_steps=total_steps,
-        )
-
         best_metric = -1.0
-        global_step = 0
-        for epoch in range(self.args.num_epochs):
-            if train_sampler is not None:
-                train_sampler.set_epoch(epoch)
-            self.model.train()
-            epoch_loss = 0.0
-            epoch_precision = 0.0
-            epoch_recall = 0.0
-            epoch_f1 = 0.0
-            epoch_r1 = 0.0
-            epoch_r3 = 0.0
-            epoch_subset = 0.0
-            epoch_node_acc = 0.0
-            epoch_entropy = 0.0
-            steps = 0
+        if is_main_process():
+            print(f"train_size={len(self.train_dataset)} eval_size={len(self.eval_dataset)}", flush=True)
+
+        for epoch in range(1, self.args.num_epochs + 1):
             t0 = time.time()
-            for batch in train_loader:
-                batch = self._move_batch(batch, self.train_serializer)
-                outputs = self.model(
-                    query_input_ids=batch["query_input_ids"],
-                    query_attention_mask=batch["query_attention_mask"],
-                    query_token_type_ids=batch["query_token_type_ids"],
-                    workspace_input_ids=batch["workspace_input_ids"],
-                    workspace_attention_mask=batch["workspace_attention_mask"],
-                    workspace_token_type_ids=batch["workspace_token_type_ids"],
-                    node_mask=batch["node_mask"],
-                    schema_prior=batch["schema_prior"],
-                    source_prior=batch["source_prior"],
+            train_logs = self.train_epoch(epoch)
+            eval_metrics = self.evaluate()
+            epoch_time = time.time() - t0
+
+            if is_main_process():
+                print(
+                    f"[Epoch {epoch}/{self.args.num_epochs}] "
+                    f"train_loss={train_logs['loss']:.4f} "
+                    f"train_retrieval_acc={train_logs['retrieval_acc']:.4f} "
+                    f"eval_loss={eval_metrics.loss:.4f} "
+                    f"eval_retrieval_acc={eval_metrics.retrieval_acc:.4f} "
+                    f"eval_mean_pos_cos={eval_metrics.mean_pos_cos:.4f} "
+                    f"eval_mean_set_cos={eval_metrics.mean_set_cos:.4f} "
+                    f"time={epoch_time:.1f}s",
+                    flush=True,
                 )
-                loss, loss_stats = self.loss_fn(outputs, batch["labels"], batch["node_mask"])
-                optimizer.zero_grad()
-                loss.backward()
-                if self.args.max_grad_norm > 0:
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.max_grad_norm)
-                optimizer.step()
-                scheduler.step()
 
-                metrics = self.compute_metrics(outputs["logits"], batch["labels"], batch["node_mask"])
-                epoch_loss += loss.item()
-                epoch_precision += metrics["precision"]
-                epoch_recall += metrics["recall"]
-                epoch_f1 += metrics["f1"]
-                epoch_r1 += metrics["recall_at_1"]
-                epoch_r3 += metrics["recall_at_3"]
-                epoch_subset += metrics["subset_acc"]
-                epoch_node_acc += metrics["node_acc"]
-                epoch_entropy += metrics["entropy"]
-                steps += 1
-                if self.tb_writer is not None and is_main_process():
-                    self.tb_writer.add_scalar("train/loss_step", loss.item(), global_step)
-                    self.tb_writer.add_scalar("train/precision_step", metrics["precision"], global_step)
-                    self.tb_writer.add_scalar("train/recall_step", metrics["recall"], global_step)
-                    self.tb_writer.add_scalar("train/f1_step", metrics["f1"], global_step)
-                    self.tb_writer.add_scalar("train/node_acc_step", metrics["node_acc"], global_step)
-                    self.tb_writer.add_scalar("train/entropy_step", metrics["entropy"], global_step)
-                    self.tb_writer.add_scalar("train/recall_at_1_step", metrics["recall_at_1"], global_step)
-                    self.tb_writer.add_scalar("train/recall_at_3_step", metrics["recall_at_3"], global_step)
-                    self.tb_writer.add_scalar("train/subset_acc_step", metrics["subset_acc"], global_step)
-                    self.tb_writer.add_scalar("train/loss_infonce_step", loss_stats["loss_infonce"], global_step)
-                    self.tb_writer.add_scalar("train/loss_bce_step", loss_stats["loss_bce"], global_step)
-                    self.tb_writer.add_scalar("train/loss_align_step", loss_stats["loss_align"], global_step)
-                    self.tb_writer.add_scalar("train/loss_subgraph_step", loss_stats["loss_subgraph"], global_step)
-                global_step += 1
+                if self.tb_writer is not None:
+                    self.tb_writer.add_scalar("loss/train", train_logs["loss"], epoch)
+                    self.tb_writer.add_scalar("loss/eval", eval_metrics.loss, epoch)
+                    self.tb_writer.add_scalar("retrieval_acc/train", train_logs["retrieval_acc"], epoch)
+                    self.tb_writer.add_scalar("retrieval_acc/eval", eval_metrics.retrieval_acc, epoch)
+                    self.tb_writer.add_scalar("similarity/mean_pos_cos_eval", eval_metrics.mean_pos_cos, epoch)
+                    self.tb_writer.add_scalar("similarity/mean_set_cos_eval", eval_metrics.mean_set_cos, epoch)
+                    self.tb_writer.add_scalar("optimizer/lr", self.optimizer.param_groups[0]["lr"], epoch)
 
-            train_loss = reduce_mean(epoch_loss / max(steps, 1), self.device)
-            train_precision = reduce_mean(epoch_precision / max(steps, 1), self.device)
-            train_recall = reduce_mean(epoch_recall / max(steps, 1), self.device)
-            train_f1 = reduce_mean(epoch_f1 / max(steps, 1), self.device)
-            train_r1 = reduce_mean(epoch_r1 / max(steps, 1), self.device)
-            train_r3 = reduce_mean(epoch_r3 / max(steps, 1), self.device)
-            train_subset = reduce_mean(epoch_subset / max(steps, 1), self.device)
-            train_node_acc = reduce_mean(epoch_node_acc / max(steps, 1), self.device)
-            train_entropy = reduce_mean(epoch_entropy / max(steps, 1), self.device)
-            eval_metrics = self.evaluate(eval_loader)
-            elapsed = time.time() - t0
-            self.log(
-                f"Epoch {epoch + 1}/{self.args.num_epochs} | "
-                f"train_loss={train_loss:.4f} train_p={train_precision:.4f} train_r={train_recall:.4f} "
-                f"train_f1={train_f1:.4f} train_acc={train_node_acc:.4f} train_entropy={train_entropy:.4f} "
-                f"train_r1={train_r1:.4f} train_r3={train_r3:.4f} train_subset={train_subset:.4f} | "
-                f"eval_loss={eval_metrics.loss:.4f} eval_p={eval_metrics.precision:.4f} "
-                f"eval_r={eval_metrics.recall:.4f} eval_f1={eval_metrics.f1:.4f} "
-                f"eval_acc={eval_metrics.node_acc:.4f} eval_entropy={eval_metrics.entropy:.4f} "
-                f"eval_r1={eval_metrics.recall_at_1:.4f} eval_r3={eval_metrics.recall_at_3:.4f} "
-                f"subset_acc={eval_metrics.subset_acc:.4f} | time={elapsed:.1f}s"
-            )
-            if self.tb_writer is not None and is_main_process():
-                self.tb_writer.add_scalar("epoch/train_loss", train_loss, epoch + 1)
-                self.tb_writer.add_scalar("epoch/train_precision", train_precision, epoch + 1)
-                self.tb_writer.add_scalar("epoch/train_recall", train_recall, epoch + 1)
-                self.tb_writer.add_scalar("epoch/train_f1", train_f1, epoch + 1)
-                self.tb_writer.add_scalar("epoch/train_node_acc", train_node_acc, epoch + 1)
-                self.tb_writer.add_scalar("epoch/train_entropy", train_entropy, epoch + 1)
-                self.tb_writer.add_scalar("epoch/train_recall_at_1", train_r1, epoch + 1)
-                self.tb_writer.add_scalar("epoch/train_recall_at_3", train_r3, epoch + 1)
-                self.tb_writer.add_scalar("epoch/train_subset_acc", train_subset, epoch + 1)
-                self.tb_writer.add_scalar("epoch/eval_loss", eval_metrics.loss, epoch + 1)
-                self.tb_writer.add_scalar("epoch/eval_precision", eval_metrics.precision, epoch + 1)
-                self.tb_writer.add_scalar("epoch/eval_recall", eval_metrics.recall, epoch + 1)
-                self.tb_writer.add_scalar("epoch/eval_f1", eval_metrics.f1, epoch + 1)
-                self.tb_writer.add_scalar("epoch/eval_node_acc", eval_metrics.node_acc, epoch + 1)
-                self.tb_writer.add_scalar("epoch/eval_entropy", eval_metrics.entropy, epoch + 1)
-                self.tb_writer.add_scalar("epoch/eval_recall_at_1", eval_metrics.recall_at_1, epoch + 1)
-                self.tb_writer.add_scalar("epoch/eval_recall_at_3", eval_metrics.recall_at_3, epoch + 1)
-                self.tb_writer.add_scalar("epoch/eval_subset_acc", eval_metrics.subset_acc, epoch + 1)
+            if eval_metrics.retrieval_acc > best_metric:
+                best_metric = eval_metrics.retrieval_acc
+                self.save_checkpoint("best.pt", epoch, best_metric)
 
-            metric = eval_metrics.recall_at_3
-            if metric > best_metric:
-                best_metric = metric
-                self.save_checkpoint("best_stage2.pt", optimizer, scheduler, epoch + 1, best_metric)
-            self.save_checkpoint("last_stage2.pt", optimizer, scheduler, epoch + 1, best_metric)
-
+        self.save_checkpoint("final.pt", self.args.num_epochs, best_metric)
         if self.tb_writer is not None:
             self.tb_writer.flush()
             self.tb_writer.close()
-            self.tb_writer = None
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Stage2 GTN-lite / Full-GTN training")
-    parser.add_argument("--data-dir", default="data")
+    parser = argparse.ArgumentParser(description="Stage2 positive-only GTN training")
+    parser.add_argument("--data-dir", default="data", help="目录下应包含 query.json 和 sheets.json")
+    parser.add_argument("--features-file", default=None, help="sheets.json 路径，默认自动推断")
+    parser.add_argument("--output-dir", default="outputs/stage2_gtn", help="Stage2 checkpoint 输出根目录")
+    parser.add_argument("--run-name", default="stage2_positive", help="运行名")
     parser.add_argument("--model-name", default="local_models/models--bert-base-uncased/snapshots/86b5e0934494bd15c9632b12f734a8a67f723594")
-    parser.add_argument("--stage1-checkpoint", default="")
+    parser.add_argument("--stage1-checkpoint", required=True, help="Stage1 classifier.pt 路径")
     parser.add_argument("--graph-mode", choices=["gtn_lite", "full_gtn"], default="gtn_lite")
-    parser.add_argument("--run-name", default="stage2-gtn-lite")
-    parser.add_argument("--output-dir", default="experiments/stage2_runs")
-    parser.add_argument("--tensorboard-logdir", default="runs/stage2_gtn")
-    parser.add_argument("--use-tensorboard", action="store_true")
-    parser.add_argument("--allow-download", action="store_true")
 
+    parser.add_argument("--num-epochs", type=int, default=20)
+    parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--learning-rate", type=float, default=2e-5)
     parser.add_argument("--weight-decay", type=float, default=1e-2)
-    parser.add_argument("--num-epochs", type=int, default=10)
-    parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--warmup-ratio", type=float, default=0.1)
+    parser.add_argument("--warmup-steps", type=int, default=0)
     parser.add_argument("--max-grad-norm", type=float, default=1.0)
-    parser.add_argument("--activation-threshold", type=float, default=0.5)
-    parser.add_argument("--num-workers", type=int, default=0)
-    parser.add_argument("--seed", type=int, default=42)
 
     parser.add_argument("--max-length", type=int, default=256)
     parser.add_argument("--max-query-length", type=int, default=64)
     parser.add_argument("--max-workspace-size", type=int, default=10)
     parser.add_argument("--max-header-texts", type=int, default=12)
-    parser.add_argument("--train-features-file", default="")
-    parser.add_argument("--eval-features-file", default="")
-    parser.add_argument("--include-shape-feature", action="store_true")
-    parser.add_argument("--include-source-feature", action="store_true")
+    parser.add_argument("--eval-ratio", type=float, default=0.1)
+    parser.add_argument("--disable-shape-feature", action="store_true")
 
     parser.add_argument("--embedding-strategy", choices=["cls", "mean", "max", "cls_mean_concat", "mean_max_concat", "cls_mean_max_concat"], default="cls")
     parser.add_argument("--use-layer-mix", action="store_true")
     parser.add_argument("--use-extra-position-embedding", action="store_true")
     parser.add_argument("--position-embedding-scale", type=float, default=1.0)
     parser.add_argument("--normalize-embeddings", action="store_true")
-    parser.add_argument("--freeze-backbone", action="store_true")
     parser.add_argument("--graph-dropout", type=float, default=0.1)
     parser.add_argument("--num-gat-layers", type=int, default=1)
-
     parser.add_argument("--tau", type=float, default=0.07)
-    parser.add_argument("--lambda-align", type=float, default=0.1)
-    parser.add_argument("--lambda-subgraph", type=float, default=0.05)
-    parser.add_argument("--bce-weight", type=float, default=1.0)
+    parser.add_argument("--lambda-align", type=float, default=0.10)
+
+    parser.add_argument("--freeze-backbone", action="store_true", help="冻结 Stage1 encoder backbone")
+    parser.add_argument("--allow-download", action="store_true")
+    parser.add_argument("--use-tensorboard", action="store_true")
+    parser.add_argument("--tensorboard-logdir", default="runs/stage2_gtn")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--num-workers", type=int, default=0)
     return parser
 
 
 def main() -> None:
-    parser = build_arg_parser()
-    args = parser.parse_args()
-    trainer = Trainer(args)
+    args = build_arg_parser().parse_args()
+    trainer = Stage2Trainer(args)
     try:
         trainer.train()
     finally:

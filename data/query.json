@@ -1,0 +1,891 @@
+[
+  {
+    "query": "Retrieve all financial statement records for Beixin Building Materials",
+    "sheet_ids": [
+      1,
+      131,
+      147,
+      297,
+      321,
+      338,
+      353,
+      359
+    ]
+  },
+  {
+    "query": "Retrieve all financial statement records for Horizon Energy",
+    "sheet_ids": [
+      4,
+      71,
+      74,
+      105,
+      136,
+      167,
+      171,
+      227,
+      231,
+      352,
+      386,
+      397,
+      559,
+      576
+    ]
+  },
+  {
+    "query": "Show all columns including Project for Zhongcai International financial data",
+    "sheet_ids": [
+      7,
+      33,
+      48,
+      107,
+      170,
+      258,
+      471,
+      491
+    ]
+  },
+  {
+    "query": "Find Blue River Materials balance sheet entries across all available years",
+    "sheet_ids": [
+      12,
+      36,
+      37,
+      70,
+      135,
+      315,
+      341,
+      349,
+      374,
+      412,
+      436,
+      510,
+      513,
+      558
+    ]
+  },
+  {
+    "query": "Find Pinnacle Corp balance sheet entries across all available years",
+    "sheet_ids": [
+      14,
+      122,
+      123,
+      204,
+      223,
+      284,
+      312,
+      346,
+      360,
+      383,
+      496,
+      534,
+      549,
+      596
+    ]
+  },
+  {
+    "query": "Find Huaxing Technology balance sheet entries across all available years",
+    "sheet_ids": [
+      15,
+      102,
+      103,
+      106,
+      211,
+      274,
+      275,
+      570
+    ]
+  },
+  {
+    "query": "Retrieve all financial statement records for Summit Securities",
+    "sheet_ids": [
+      21,
+      97,
+      99,
+      117,
+      137,
+      151,
+      152,
+      178,
+      179,
+      203,
+      422,
+      499,
+      554,
+      611
+    ]
+  },
+  {
+    "query": "Analyze Vertex Capital annual financial figures across reporting periods",
+    "sheet_ids": [
+      27,
+      30,
+      55,
+      145,
+      289,
+      399,
+      419,
+      482,
+      498,
+      511,
+      523,
+      561,
+      578,
+      608
+    ]
+  },
+  {
+    "query": "Retrieve all financial statement records for Sterling Group",
+    "sheet_ids": [
+      39,
+      42,
+      43,
+      84,
+      112,
+      148,
+      314,
+      322,
+      336,
+      345,
+      417,
+      455,
+      474,
+      524
+    ]
+  },
+  {
+    "query": "Analyze Nanfang Cement annual financial figures across reporting periods",
+    "sheet_ids": [
+      45,
+      177,
+      306,
+      402,
+      451,
+      454,
+      475,
+      575
+    ]
+  },
+  {
+    "query": "List Oriental Electric financial statements from 2019 to 2025",
+    "sheet_ids": [
+      56,
+      229,
+      271,
+      288,
+      384,
+      389,
+      395,
+      580
+    ]
+  },
+  {
+    "query": "Retrieve all financial statement records for Apex Technologies",
+    "sheet_ids": [
+      59,
+      228,
+      256,
+      300,
+      337,
+      376,
+      420,
+      421,
+      449,
+      462,
+      512,
+      553,
+      597,
+      613
+    ]
+  },
+  {
+    "query": "Retrieve all financial statement records for Kaisheng Materials",
+    "sheet_ids": [
+      68,
+      350,
+      377,
+      391,
+      433,
+      497,
+      541,
+      552
+    ]
+  },
+  {
+    "query": "Retrieve all financial statement records for Delta Manufacturing",
+    "sheet_ids": [
+      77,
+      98,
+      109,
+      209,
+      249,
+      257,
+      263,
+      371,
+      416,
+      425,
+      435,
+      515,
+      526,
+      598
+    ]
+  },
+  {
+    "query": "Find Everbright Securities balance sheet entries across all available years",
+    "sheet_ids": [
+      86,
+      87,
+      185,
+      186,
+      193,
+      266,
+      286,
+      485
+    ]
+  },
+  {
+    "query": "Find Crown Holdings balance sheet entries across all available years",
+    "sheet_ids": [
+      104,
+      153,
+      255,
+      287,
+      310,
+      311,
+      318,
+      343,
+      388,
+      411,
+      434,
+      521,
+      540,
+      562
+    ]
+  },
+  {
+    "query": "Analyze Zhongxin Building Materials annual financial figures across reporting periods",
+    "sheet_ids": [
+      121,
+      324,
+      375,
+      413,
+      460,
+      531,
+      567,
+      593
+    ]
+  },
+  {
+    "query": "Analyze Pacific Building annual financial figures across reporting periods",
+    "sheet_ids": [
+      125,
+      241,
+      292,
+      313,
+      327,
+      342,
+      347,
+      426,
+      440,
+      490,
+      529,
+      581,
+      589,
+      604
+    ]
+  },
+  {
+    "query": "Retrieve synthetic financial records for Oriental Electric",
+    "sheet_ids": [
+      2,
+      40,
+      94,
+      594,
+      600,
+      602
+    ]
+  },
+  {
+    "query": "Find all augmented financial statement tables for Nanfang Cement",
+    "sheet_ids": [
+      19,
+      285,
+      466,
+      539,
+      583,
+      612
+    ]
+  },
+  {
+    "query": "Show financial projections for Guangda Securities from synthetic dataset",
+    "sheet_ids": [
+      46,
+      47,
+      262,
+      279,
+      323,
+      479
+    ]
+  },
+  {
+    "query": "Find all augmented financial statement tables for Zhongcai International",
+    "sheet_ids": [
+      79,
+      146,
+      210,
+      218,
+      365,
+      432
+    ]
+  },
+  {
+    "query": "Show financial projections for Huaxing Technology from synthetic dataset",
+    "sheet_ids": [
+      116,
+      317,
+      398,
+      406,
+      442,
+      480
+    ]
+  },
+  {
+    "query": "List Beixin Building synthetic balance sheet data across years",
+    "sheet_ids": [
+      140,
+      351,
+      363,
+      445,
+      483,
+      595
+    ]
+  },
+  {
+    "query": "Retrieve synthetic financial records for Zhongxin Building",
+    "sheet_ids": [
+      149,
+      150,
+      195,
+      452,
+      477,
+      536
+    ]
+  },
+  {
+    "query": "Find all augmented financial statement tables for Kaisheng Materials",
+    "sheet_ids": [
+      163,
+      259,
+      330,
+      378,
+      430,
+      431
+    ]
+  },
+  {
+    "query": "Show all sales entries for fiscal year 2019",
+    "sheet_ids": [
+      3,
+      35,
+      53,
+      176,
+      235,
+      309,
+      464,
+      495
+    ]
+  },
+  {
+    "query": "Retrieve 2020 sales data grouped by Salesperson",
+    "sheet_ids": [
+      95,
+      239,
+      246,
+      252,
+      298,
+      410,
+      447,
+      492
+    ]
+  },
+  {
+    "query": "Retrieve 2021 sales data grouped by Sales Amount (RMB)",
+    "sheet_ids": [
+      11,
+      58,
+      291,
+      303,
+      394,
+      486,
+      527,
+      537
+    ]
+  },
+  {
+    "query": "List sales transactions from 2025 across all quarters",
+    "sheet_ids": [
+      159,
+      358,
+      380,
+      407,
+      465,
+      504,
+      538,
+      606
+    ]
+  },
+  {
+    "query": "Find 2019 inventory records with Material Name information",
+    "sheet_ids": [
+      6,
+      10,
+      29,
+      92,
+      108,
+      113,
+      126,
+      127,
+      142,
+      143,
+      157,
+      219,
+      224,
+      232,
+      294,
+      379,
+      392,
+      472,
+      535,
+      544,
+      563,
+      587,
+      590,
+      601
+    ]
+  },
+  {
+    "query": "List all product stock data across months in 2020",
+    "sheet_ids": [
+      119,
+      124,
+      144,
+      201,
+      244,
+      251,
+      253,
+      254,
+      261,
+      264,
+      308,
+      328,
+      387,
+      403,
+      439,
+      463,
+      488,
+      502,
+      505,
+      520,
+      533,
+      542,
+      584,
+      588
+    ]
+  },
+  {
+    "query": "Retrieve all inventory stock ledger entries from 2021",
+    "sheet_ids": [
+      9,
+      24,
+      25,
+      69,
+      72,
+      155,
+      187,
+      245,
+      260,
+      293,
+      344,
+      362,
+      364,
+      409,
+      415,
+      514,
+      516,
+      518,
+      557,
+      560,
+      564,
+      574,
+      577,
+      609
+    ]
+  },
+  {
+    "query": "Retrieve all inventory stock ledger entries from 2025",
+    "sheet_ids": [
+      13,
+      31,
+      96,
+      100,
+      101,
+      130,
+      196,
+      206,
+      212,
+      248,
+      301,
+      302,
+      316,
+      320,
+      366,
+      370,
+      405,
+      414,
+      427,
+      469,
+      489,
+      555,
+      556,
+      566
+    ]
+  },
+  {
+    "query": "Show 2019 headcount, attendance, and payroll tables",
+    "sheet_ids": [
+      17,
+      41,
+      190,
+      393,
+      441,
+      509,
+      545,
+      582
+    ]
+  },
+  {
+    "query": "Find all 2020 HR records including attendance and roster data",
+    "sheet_ids": [
+      114,
+      134,
+      240,
+      242,
+      329,
+      339,
+      573,
+      591
+    ]
+  },
+  {
+    "query": "List staff records across all HR tables from 2021",
+    "sheet_ids": [
+      158,
+      299,
+      304,
+      319,
+      333,
+      517,
+      551,
+      569
+    ]
+  },
+  {
+    "query": "List staff records across all HR tables from 2025",
+    "sheet_ids": [
+      200,
+      233,
+      250,
+      281,
+      282,
+      401,
+      450,
+      470
+    ]
+  },
+  {
+    "query": "Retrieve 2019 project planning and funding tables",
+    "sheet_ids": [
+      326,
+      334,
+      423,
+      459,
+      467,
+      528
+    ]
+  },
+  {
+    "query": "List all 2020 project budget and execution records",
+    "sheet_ids": [
+      197,
+      217,
+      368,
+      493,
+      522,
+      603
+    ]
+  },
+  {
+    "query": "Show all project management data for 2021",
+    "sheet_ids": [
+      236,
+      267,
+      295,
+      373,
+      408,
+      501
+    ]
+  },
+  {
+    "query": "List all 2025 project budget and execution records",
+    "sheet_ids": [
+      90,
+      175,
+      213,
+      243,
+      508,
+      605
+    ]
+  },
+  {
+    "query": "Show stock market entries for every Q1 period (2019–2025)",
+    "sheet_ids": [
+      115,
+      128,
+      129,
+      225,
+      280,
+      361,
+      530,
+      571
+    ]
+  },
+  {
+    "query": "Retrieve all Q2 stock market data including Date",
+    "sheet_ids": [
+      154,
+      172,
+      183,
+      237,
+      296,
+      424,
+      453,
+      592
+    ]
+  },
+  {
+    "query": "List Q3 trading data with Date and Trading Amount (10K RMB) columns",
+    "sheet_ids": [
+      198,
+      199,
+      230,
+      290,
+      372,
+      438,
+      487,
+      607
+    ]
+  },
+  {
+    "query": "List Q4 trading data with Date and Opening Price columns",
+    "sheet_ids": [
+      138,
+      161,
+      215,
+      276,
+      428,
+      437,
+      456,
+      586
+    ]
+  },
+  {
+    "query": "Retrieve augmented Stock Market data with Date field",
+    "sheet_ids": [
+      0,
+      22,
+      23,
+      76,
+      82,
+      164,
+      220,
+      268,
+      272,
+      305,
+      355,
+      382,
+      446,
+      458,
+      506,
+      543
+    ]
+  },
+  {
+    "query": "Find all synthetic Sales Data records",
+    "sheet_ids": [
+      8,
+      18,
+      28,
+      111,
+      132,
+      139,
+      141,
+      156,
+      160,
+      162,
+      221,
+      222,
+      238,
+      307,
+      331,
+      335,
+      400,
+      429,
+      494,
+      500,
+      503,
+      507,
+      532,
+      548
+    ]
+  },
+  {
+    "query": "Find all synthetic Human Resources records",
+    "sheet_ids": [
+      38,
+      44,
+      49,
+      50,
+      54,
+      63,
+      64,
+      75,
+      191,
+      226,
+      278,
+      356,
+      404,
+      443,
+      473,
+      546
+    ]
+  },
+  {
+    "query": "Retrieve augmented Project Management data with Project ID field",
+    "sheet_ids": [
+      52,
+      66,
+      85,
+      166,
+      168,
+      189,
+      202,
+      325,
+      396,
+      448,
+      519,
+      579
+    ]
+  },
+  {
+    "query": "List synthetic Inventory Products entries across all time periods",
+    "sheet_ids": [
+      57,
+      61,
+      62,
+      78,
+      80,
+      165,
+      173,
+      181,
+      188,
+      207,
+      208,
+      247,
+      269,
+      340,
+      357,
+      390,
+      444,
+      461,
+      478,
+      481,
+      484,
+      565,
+      568,
+      572
+    ]
+  },
+  {
+    "query": "Retrieve all financial business records including Entity ID data",
+    "sheet_ids": [
+      5,
+      26,
+      32,
+      34,
+      60,
+      65,
+      73,
+      81,
+      88,
+      89,
+      91,
+      93,
+      110,
+      118,
+      120,
+      133,
+      169,
+      180,
+      182,
+      192,
+      194,
+      234,
+      265,
+      270,
+      273,
+      369,
+      381,
+      385,
+      457,
+      468,
+      476,
+      525,
+      547,
+      585,
+      599,
+      610
+    ]
+  },
+  {
+    "query": "Find closing prices and volumes across all global indices",
+    "sheet_ids": [
+      20,
+      67,
+      83,
+      184,
+      205,
+      214,
+      216,
+      277,
+      283,
+      332,
+      367,
+      550
+    ]
+  },
+  {
+    "query": "Find all movie rating records with Type information",
+    "sheet_ids": [
+      16,
+      51,
+      174,
+      418
+    ]
+  },
+  {
+    "query": "Retrieve all text sentiment analysis records including labels and raw text",
+    "sheet_ids": [
+      348,
+      354
+    ]
+  }
+]

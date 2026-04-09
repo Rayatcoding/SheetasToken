@@ -34,8 +34,9 @@ echo "==============================" >> "$LOG_FILE"
 
 nohup torchrun --nproc_per_node="${GPU_COUNT}" biencoder_model.py \
   --data-dir data \
-  --output-dir outputs/stage1_biencoder \
-  --run-name "$RUN_NAME" \
+  --train-features-file data/sheets.json \
+  --eval-features-file data/sheets.json \
+  --wandb-run-name "$RUN_NAME" \
   --use-tensorboard \
   --tensorboard-logdir runs/stage1_biencoder \
   --num-epochs 50 \
@@ -43,8 +44,6 @@ nohup torchrun --nproc_per_node="${GPU_COUNT}" biencoder_model.py \
   --learning-rate 2e-5 \
   --max-length 256 \
   --embedding-strategy cls \
-  --include-shape-feature \
-  --include-source-feature \
   >> "$LOG_FILE" 2>&1 &
 
 PID=$!
