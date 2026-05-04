@@ -1,7 +1,4 @@
-"""
-基于 Hugging Face Transformers 的训练框架
-用于表格相似度分类任务 (Bi-Encoder 架构)
-"""
+
 
 import argparse
 import json
@@ -22,13 +19,11 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
-# 默认离线，可通过 --allow-download 覆盖
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
 
 
 class SheetSimilarityDataset(Dataset):
-    """表格相似度数据集 (Bi-Encoder)"""
 
     def __init__(
         self,
@@ -360,7 +355,6 @@ class SimilarityClassifier(nn.Module):
 
         emb1 = self._build_embedding(sequence_output1, attention_mask1)
 
-        # 2. 编码第二个文本
         outputs2 = self.backbone(
             input_ids=input_ids2,
             attention_mask=attention_mask2,
@@ -371,7 +365,6 @@ class SimilarityClassifier(nn.Module):
 
         if self.use_layer_mix:
             hidden_states2 = torch.stack(outputs2.hidden_states, dim=0)
-            # 复用 layer_probs
             sequence_output2 = (hidden_states2 * layer_probs).sum(dim=0)
         else:
             sequence_output2 = outputs2.last_hidden_state
@@ -384,17 +377,14 @@ class SimilarityClassifier(nn.Module):
 
         emb2 = self._build_embedding(sequence_output2, attention_mask2)
 
-        # 3. 组合特征 (Sentence-BERT 经典组合方式: [u, v, |u-v|])
         diff = torch.abs(emb1 - emb2)
         combined_emb = torch.cat([emb1, emb2, diff], dim=-1)
 
-        # 4. 分类预测
         logits = self.classifier(self.dropout(combined_emb))
         return logits
 
 
 class TransformerTrainer:
-    """Transformer 分类模型训练器"""
 
     def __init__(
         self,
@@ -503,9 +493,6 @@ class TransformerTrainer:
         self.loss_fn = nn.CrossEntropyLoss(label_smoothing=self.label_smoothing)
 
     def _calculate_normalized_entropy(self, logits):
-        """计算标准化熵: H_norm = -Σ(p_i * log(p_i)) / log(num_labels)
-        范围: [0, 1]，0表示完全确定，1表示最大不确定性
-        """
         probs = torch.softmax(logits, dim=-1)
         entropy = -(probs * torch.log(probs + 1e-10)).sum(dim=-1)
         max_entropy = torch.log(torch.tensor(self.num_labels, dtype=torch.float32, device=logits.device))
