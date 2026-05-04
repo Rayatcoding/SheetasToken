@@ -225,17 +225,6 @@ __pycache__/
 
 You can expand this as needed for your environment.
 
----
-
-## Notes
-
-- The scripts in `scripts/` are the recommended entry points for the paper experiments.
-- `models/stage1/biencoder_model.py` is retained for reference, but it is not the primary Stage 1 implementation used in the paper.
-- The repository is organized to keep the paper-relevant paths explicit and reproducible.
-- If you use your own dataset layout, update the relevant path variables in the scripts.
-- Remove runtime artifacts such as `api/uvicorn.pid` and accidental files like `api/-H` or `api/-d` before publishing the repository.
-
----
 
 ## Citation
 
