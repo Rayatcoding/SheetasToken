@@ -1,329 +1,242 @@
-# AgentSheet (Current Working Version)
+# SheetAgent Paper Repository
 
-> Current repo status after the Stage1 / Stage2 redesign
+This repository contains the code for our two-stage spreadsheet retrieval pipeline, including the Stage 1 sheet encoder, the Stage 2 graph retriever, and the experiment scripts used in the paper.
 
-This repository is no longer using the original paper-style implementation as the main training path.  
-The **current working pipeline** is:
+## Overview
 
-- **Stage1:** Bi-Encoder sheet-pair representation learning
-- **Stage2:** GTN-based query-guided graph reasoning (`gtn_lite` / `full_gtn`)
+Our system separates spreadsheet understanding into two stages:
 
-The old `models/agentsheet.py` / `scripts/train.py` path is retained only as historical reference.  
-The files you should use now are:
+- **Stage 1: Sheet Token Encoder**
+  - Learns reusable sheet-level representations from pairwise sheet supervision.
+  - Supports two main variants:
+    - `with_example`: sheet serialization includes column examples
+    - `wo_example`: sheet serialization excludes column examples
 
-- `biencoder_model.py`
-- `train_ddp.sh`
-- `stage2_gtn.py`
-- `train_stage2_ddp.sh`
+- **Stage 2: Graph Retriever**
+  - Performs query-conditioned cross-sheet retrieval over a candidate workspace.
+  - Supports two main variants:
+    - `baseline`: shallower graph retriever
+    - `enhanced`: graph-enhanced retriever with stronger relational composition
 
----
+The final paper model uses:
 
-## 1. Current two-stage pipeline
-
-### Stage1: Bi-Encoder sheet similarity learning
-
-**Goal**
-
-Learn a good embedding for each sheet and a pairwise similarity prior between sheets.
-
-**Input**
-
-Training files under `data/`:
-
-- `pairwise_train.json`
-- `pairwise_eval.json`
-
-Feature files:
-
-- `sheet_features_train.json`
-- `sheet_features_eval.json`
-
-or a shared:
-
-- `sheet_features.json`
-
-Each pairwise sample should contain either:
-
-- `sheet_a`, `sheet_b`, `label`
-
-or directly:
-
-- `sheet1_text`, `sheet2_text`, `label`
-
-**Architecture**
-
-`biencoder_model.py`
-
-1. Convert each sheet into text using feature fields such as:
-   - `source`
-   - `shape` (`num_rows x num_cols`)
-   - `headers`
-2. Encode the two sheets with a **shared Transformer backbone**
-3. Build pair representation from:
-   - `u`
-   - `v`
-   - `|u-v|`
-4. Feed the concatenated representation into a classifier head
-
-**Output**
-
-- pairwise logits
-- sheet embeddings
-- a Stage1 checkpoint for Stage2 initialization
-
-**Checkpoint location**
-
-The current Stage1 training path saves checkpoints to:
-
-```bash
-outputs/stage1_biencoder/best_model/classifier.pt
-outputs/stage1_biencoder/final_model/classifier.pt
-```
+- **Stage 1 with examples**
+- **Stage 2 enhanced**
+- **frozen Stage 1 encoder during Stage 2 training**
 
 ---
 
-### Stage2: GTN-based query-guided subgraph activation
-
-**Goal**
-
-Given a query and a workspace of multiple sheets, predict which sheets are relevant.
-
-**Input**
-
-Training files under `data/`:
-
-- `nway_train.json`
-- `nway_eval.json`
-
-Feature files:
-
-- `sheet_features_train.json`
-- `sheet_features_eval.json`
-
-or a shared:
-
-- `sheet_features.json`
-
-Each N-way sample should contain:
-
-- `query`
-- `workspace` (list of sheet IDs or sheet references)
-- relevant labels / relevant subset
-
-**Architecture**
-
-`stage2_gtn.py`
-
-#### Step 1: Encode query and sheets
-- query -> `query_emb`
-- each workspace sheet -> initial node embedding
-
-#### Step 2: Build multi-channel graph
-Typical adjacency channels include:
-- semantic graph
-- query-conditioned graph
-- schema prior graph
-- source / shape prior graph
-
-#### Step 3: Learn graph structure
-Two supported modes:
-
-**`gtn_lite`**
-- learn a softmax gate over graph channels
-- fuse them into one graph
-
-**`full_gtn`**
-- learn two gated graph mixtures
-- multiply them to produce a meta-path-style graph
-
-#### Step 4: Graph propagation
-- run GAT on the learned graph
-- produce refined node embeddings and attention weights
-
-#### Step 5: Query-guided node scoring
-- score each sheet node against the query
-- output node relevance logits
-
-**Losses**
-
-Stage2 combines:
-- InfoNCE loss
-- alignment loss
-- subgraph regularization
-- BCE node classification loss
-
-**Output**
-
-- `query_emb`
-- `node_embs`
-- `gat_attn_weights`
-- `sheet_sim_scores`
-- node logits
-- relevant sheet predictions
-
----
-
-## 2. Repo files to use now
-
-### Main Stage1 files
-- `biencoder_model.py`
-- `train_ddp.sh`
-
-### Main Stage2 files
-- `stage2_gtn.py`
-- `train_stage2_ddp.sh`
-
-### Data construction / legacy files
-- `data/build_dataset.py`
-- `models/agentsheet.py`
-- `scripts/train.py`
-
-These legacy files are not the main training entry points anymore.
-
----
-
-## 3. Data requirements
-
-### Stage1
-Required:
+## Repository Structure
 
 ```text
-data/
-  pairwise_train.json
-  pairwise_eval.json
-  sheet_features_train.json
-  sheet_features_eval.json
-```
-
-Alternative:
-
-```text
-data/
-  pairwise_train.json
-  pairwise_eval.json
-  sheet_features.json
-```
-
-### Stage2
-Required:
-
-```text
-data/
-  nway_train.json
-  nway_eval.json
-  sheet_features_train.json
-  sheet_features_eval.json
-```
-
-Alternative:
-
-```text
-data/
-  nway_train.json
-  nway_eval.json
-  sheet_features.json
+.
+├── api/                                  # Optional API serving code
+├── configs/                              # Configuration files
+├── data/                                 # Training / evaluation data
+├── docs/                                 # Notes or documentation
+├── models/
+│   ├── stage1/
+│   │   ├── biencoder_model.py            # Legacy Stage 1 baseline (reference only)
+│   │   ├── biencoder_model_with_example.py
+│   │   └── biencoder_model_wo_example.py
+│   └── stage2/
+│       ├── stage2_gtn_baseline.py
+│       └── stage2_gtn_v2.py
+├── scripts/
+│   ├── stage1/
+│   │   ├── train_with_example.sh
+│   │   └── train_wo_example.sh
+│   └── stage2/
+│       ├── train_baseline_freeze.sh
+│       └── train_enhanced_freeze.sh
+├── utils/                                # Utility functions
+├── requirements.txt
+└── README.md
 ```
 
 ---
 
-## 4. How to run
+## Main Files
 
-### Stage1
+### Stage 1
+- `models/stage1/biencoder_model_with_example.py`  
+  Stage 1 encoder using example-enhanced sheet serialization.
+
+- `models/stage1/biencoder_model_wo_example.py`  
+  Stage 1 encoder without column examples.
+
+- `models/stage1/biencoder_model.py`  
+  Legacy / early Stage 1 baseline, kept for reference only.  
+  Current paper experiments use the two variants above.
+
+### Stage 2
+- `models/stage2/stage2_gtn_baseline.py`  
+  Shallow graph retriever used as the architecture ablation / shadow model.
+
+- `models/stage2/stage2_gtn_v2.py`  
+  Enhanced graph retriever used as the full model.
+
+---
+
+## Data Format
+
+The code expects the dataset under `data/`.
+
+Typical files include:
+
+- `data/sheets.json`  
+  Sheet metadata and serialized sheet content.
+
+- `data/train.json`  
+  Pairwise Stage 1 supervision data.
+
+- `data/query.json`  
+  Query-conditioned Stage 2 retrieval data.
+
+Adjust paths if your local setup differs.
+
+---
+
+## Environment Setup
+
+Install dependencies first:
 
 ```bash
-bash train_ddp.sh
+pip install -r requirements.txt
 ```
 
-This launches DDP training for the Bi-Encoder Stage1.
+The scripts default to the Hugging Face model name `bert-base-uncased`.
 
-Expected output checkpoint:
+If you want to use a local pretrained model snapshot, you can override `MODEL_NAME` when running a script.
+
+Example:
 
 ```bash
-outputs/stage1_biencoder/best_model/classifier.pt
+MODEL_NAME=/path/to/local/model bash scripts/stage2/train_enhanced_freeze.sh
 ```
 
 ---
 
-### Stage2 Lite
+## Training Scripts
+
+### Stage 1
+
+Train Stage 1 with example-enhanced serialization:
 
 ```bash
-bash train_stage2_ddp.sh gtn_lite
+bash scripts/stage1/train_with_example.sh
 ```
 
-### Stage2 Full GTN
+Train Stage 1 without column examples:
 
 ```bash
-bash train_stage2_ddp.sh full_gtn
+bash scripts/stage1/train_wo_example.sh
 ```
 
-By default, `train_stage2_ddp.sh` will first try to load:
+### Stage 2
+
+Train the Stage 2 baseline retriever with frozen Stage 1:
 
 ```bash
-outputs/stage1_biencoder/best_model/classifier.pt
+bash scripts/stage2/train_baseline_freeze.sh
 ```
 
-and fall back to:
+Train the Stage 2 enhanced retriever with frozen Stage 1:
 
 ```bash
-best_model/classifier.pt
-```
-
-You can also override manually:
-
-```bash
-STAGE1_CKPT=/path/to/classifier.pt bash train_stage2_ddp.sh gtn_lite
-```
-
----
-
-## 5. Recommended run order
-
-### Step 1
-Run Stage1 first:
-
-```bash
-bash train_ddp.sh
-```
-
-### Step 2
-Confirm the checkpoint exists:
-
-```bash
-outputs/stage1_biencoder/best_model/classifier.pt
-```
-
-### Step 3
-Run Stage2 Lite first:
-
-```bash
-bash train_stage2_ddp.sh gtn_lite
-```
-
-### Step 4
-Then run Full GTN:
-
-```bash
-bash train_stage2_ddp.sh full_gtn
+bash scripts/stage2/train_enhanced_freeze.sh
 ```
 
 ---
 
-## 6. Practical notes
+## Optional Script Overrides
 
-1. If Stage2 cannot start, first check whether `nway_train.json` and `nway_eval.json` exist.
-2. If Stage2 cannot find the Stage1 checkpoint, either:
-   - make sure Stage1 finished normally, or
-   - pass `STAGE1_CKPT=/your/path/classifier.pt`
-3. If your local backbone path differs, set `MODEL_NAME=/your/model/path`.
+The shell scripts support environment-variable overrides.
+
+Common overrides include:
+
+- `MODEL_NAME`
+- `DATA_DIR`
+- `STAGE1_CKPT`
+- `OUTPUT_DIR`
+- `TB_DIR`
+- `BEST_MODEL_DIR`
+- `FINAL_MODEL_DIR`
+
+Example:
+
+```bash
+MODEL_NAME=/path/to/local/model \
+STAGE1_CKPT=best_model_with_example/classifier.pt \
+bash scripts/stage2/train_enhanced_freeze.sh
+```
+
+This makes the scripts usable on both local machines and remote servers without hardcoding machine-specific paths.
 
 ---
 
-## 7. One-line summary
+## Paper Experiment Mapping
 
-- **Stage1** learns sheet embeddings and sheet-sheet similarity
-- **Stage2** performs query-guided graph reasoning over a workspace of sheets
+### Full Model
+- Stage 1: `with_example`
+- Stage 2: `enhanced`
+- Stage 1 encoder frozen during Stage 2 training
 
-In short:
+### Architecture Ablation
+- Stage 1: `with_example`
+- Stage 2: `baseline`
+- Stage 1 encoder frozen during Stage 2 training
 
-> Stage1 learns what sheets look like and how similar they are;  
-> Stage2 learns which subset of sheets should be activated for a given query.
+### Feature Ablation
+- Stage 1: `wo_example`
+- Stage 2: `enhanced`
+- Stage 1 encoder frozen during Stage 2 training
+
+---
+
+## Outputs
+
+Training scripts typically write outputs to:
+
+- `runs/...` for TensorBoard logs
+- `outputs/...` for experiment outputs
+- `best_model_*` / `final_model_*` for Stage 1 checkpoints
+
+These training artifacts are local experiment outputs and should generally not be committed to Git.
+
+---
+
+## Recommended Git Ignore
+
+A typical `.gitignore` should include at least:
+
+```gitignore
+best_model/
+best_model_with_example/
+best_model_wo_example/
+final_model/
+final_model_with_example/
+final_model_wo_example/
+outputs/
+runs/
+*.log
+__pycache__/
+```
+
+You can expand this as needed for your environment.
+
+---
+
+## Notes
+
+- The scripts in `scripts/` are the recommended entry points for the paper experiments.
+- `models/stage1/biencoder_model.py` is retained for reference, but it is not the primary Stage 1 implementation used in the paper.
+- The repository is organized to keep the paper-relevant paths explicit and reproducible.
+- If you use your own dataset layout, update the relevant path variables in the scripts.
+- Remove runtime artifacts such as `api/uvicorn.pid` and accidental files like `api/-H` or `api/-d` before publishing the repository.
+
+---
+
+## Citation
+
+If you use this repository, please cite the associated paper.
